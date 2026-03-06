@@ -1,0 +1,91 @@
+{
+  "projectType": "saas",
+  "projectName": "Bitácora Universal",
+  "projectDescription": "Personal notebook application for creating templates, defining custom fields, managing records, and tracking logs with scores and comments.",
+  "theme": "almond",
+  "primaryColor": "#8B6F47",
+  "lightColor": "#D4A574",
+  "darkColor": "#5A4631",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": ["introduction", "quickstart", "installation"]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "features/templates",
+              "features/fields",
+              "features/rows",
+              "features/logs"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/authentication",
+              "guides/creating-templates",
+              "guides/managing-data",
+              "guides/scoring-system"
+            ]
+          },
+          {
+            "group": "Development",
+            "pages": [
+              "development/architecture",
+              "development/database",
+              "development/frontend",
+              "development/deployment"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": ["api/overview", "api/authentication"]
+          },
+          {
+            "group": "Endpoints",
+            "pages": [
+              "api/auth",
+              "api/templates",
+              "api/fields",
+              "api/rows",
+              "api/logs"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "User authentication with JWT",
+    "Custom template creation",
+    "Dynamic field definitions with multiple data types",
+    "Record management with JSON storage",
+    "Log entries with scoring system (0-10)",
+    "Multi-user support with data isolation"
+  ],
+  "publicApiSurface": [
+    "POST /api/v1/auth/register",
+    "POST /api/v1/auth/login",
+    "GET /api/v1/templates",
+    "POST /api/v1/templates",
+    "GET /api/v1/templates/{templateId}",
+    "POST /api/v1/templates/{templateId}/fields",
+    "GET /api/v1/templates/{templateId}/rows",
+    "POST /api/v1/templates/{templateId}/rows",
+    "GET /api/v1/templates/{templateId}/rows/{rowId}",
+    "PATCH /api/v1/templates/{templateId}/rows/{rowId}",
+    "DELETE /api/v1/templates/{templateId}/rows/{rowId}",
+    "GET /api/v1/rows/{rowId}/logs",
+    "POST /api/v1/rows/{rowId}/logs"
+  ]
+}
