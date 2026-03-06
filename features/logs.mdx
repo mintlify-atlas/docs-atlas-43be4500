@@ -1,0 +1,387 @@
+---
+title: Logs
+description: Track history, scores, and timeline for your data
+icon: clock-rotate-left
+---
+
+## Overview
+
+Logs are time-stamped entries that track the history of individual rows. Each log entry captures a score (0.00 to 10.00), a comment, and optionally a specific event date. Logs enable you to monitor changes, track performance over time, and maintain a detailed history of your data.
+
+<Info>
+Think of logs as a journal or timeline for each row - recording observations, ratings, and notes as things evolve.
+</Info>
+
+## Use Cases
+
+<CardGroup cols={2}>
+  <Card title="Progress Tracking" icon="chart-line">
+    Monitor how items improve or deteriorate over time (e.g., car condition, apartment cleanliness)
+  </Card>
+  <Card title="Rating History" icon="star">
+    Keep a historical record of changing opinions and evaluations
+  </Card>
+  <Card title="Event Notes" icon="note-sticky">
+    Record specific events with dates, scores, and detailed comments
+  </Card>
+  <Card title="Decision Making" icon="scale-balanced">
+    Review past scores and notes to make informed decisions
+  </Card>
+</CardGroup>
+
+## Data Structure
+
+### Database Schema
+
+```sql
+CREATE TABLE log_entry (
+  id            BINARY(16) NOT NULL,
+  owner_id      VARCHAR(64) NOT NULL,
+  row_id        BINARY(16) NOT NULL,
+  score         DECIMAL(4,2) NOT NULL,
+  comment       TEXT NOT NULL,
+  event_date    DATE NULL,
+  created_at    TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  CONSTRAINT fk_log_row
+    FOREIGN KEY (row_id) REFERENCES object_row(id)
+      ON DELETE CASCADE,
+  KEY ix_log_owner_row_created (owner_id, row_id, created_at),
+  CONSTRAINT ck_log_score_range
+    CHECK (score >= 0.00 AND score <= 10.00)
+);
+```
+
+<Note>
+The score constraint ensures all ratings are between 0.00 and 10.00, providing a consistent 10-point scale.
+</Note>
+
+### Java Entity
+
+```java
+@Entity
+@Table(name = "log_entry")
+public class LogEntryEntity {
+
+    @Id
+    @Column(name = "id", nullable = false, columnDefinition = "BINARY(16)")
+    private UUID id;
+
+    @Column(name = "owner_id", nullable = false, length = 64)
+    private String ownerId;
+
+    @Column(name = "row_id", nullable = false, columnDefinition = "BINARY(16)")
+    private UUID rowId;
+
+    @Column(name = "score", nullable = false, precision = 4, scale = 2)
+    private java.math.BigDecimal score;
+
+    @Column(name = "comment", nullable = false, columnDefinition = "TEXT")
+    private String comment;
+
+    @Column(name = "event_date")
+    private LocalDate eventDate;
+
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private Instant createdAt;
+}
+```
+
+<Note>
+See `LogEntryEntity.java:9` for the complete entity with lifecycle hooks.
+</Note>
+
+### TypeScript Type
+
+```typescript
+type LogResponse = {
+  id: string;
+  score: number;
+  comment: string;
+  eventDate: string | null;
+  createdAt: string;
+};
+
+type CreateLogRequest = {
+  score: number;
+  comment: string;
+  eventDate?: string;
+};
+```
+
+## Log Properties
+
+| Property | Type | Required | Constraints | Description |
+|----------|------|----------|-------------|-------------|
+| `id` | UUID | Yes (auto) | 16 bytes | Unique identifier |
+| `owner_id` | String | Yes | 64 chars | User who owns this log |
+| `row_id` | UUID | Yes | 16 bytes | Parent row being tracked |
+| `score` | Decimal | Yes | 0.00 - 10.00 | Rating on a 10-point scale |
+| `comment` | Text | Yes | Unlimited | Detailed notes or observations |
+| `event_date` | Date | No | YYYY-MM-DD | Optional date when event occurred |
+| `created_at` | Timestamp | Yes (auto) | - | When log was created |
+
+## Score System
+
+Logs use a 10-point rating scale:
+
+- **0.00 - 2.00**: Poor/Terrible
+- **2.01 - 4.00**: Below Average
+- **4.01 - 6.00**: Average/Okay
+- **6.01 - 8.00**: Good
+- **8.01 - 10.00**: Excellent/Outstanding
+
+<Info>
+Scores are stored as `DECIMAL(4,2)`, supporting precision up to two decimal places (e.g., 7.50, 9.25).
+</Info>
+
+## Creating Logs
+
+### Validation
+
+When creating a log entry, the service validates:
+
+1. **Row exists** - The parent row must exist
+2. **Score range** - Score must be between 0.00 and 10.00 (enforced by database constraint)
+3. **Comment required** - Comment cannot be empty
+4. **Event date format** - If provided, must be valid YYYY-MM-DD format
+
+### Implementation
+
+```java
+public LogResponse create(UUID rowId, CreateLogRequest req) {
+    // Ensure the row exists
+    boolean exists = rowRepository.existsById(rowId);
+    if (!exists) 
+        throw new ConflictException("Row no encontrada");
+
+    // Parse optional event date
+    LocalDate eventDate = null;
+    if (req.getEventDate() != null && !req.getEventDate().isBlank()) {
+        try { 
+            eventDate = LocalDate.parse(req.getEventDate().trim()); 
+        } catch (Exception e) { 
+            throw new ConflictException(
+                "eventDate inválida (YYYY-MM-DD)"
+            ); 
+        }
+    }
+
+    // Create log entry
+    LogEntryEntity e = new LogEntryEntity();
+    e.setOwnerId(ownerId());
+    e.setRowId(rowId);
+    e.setScore(req.getScore());
+    e.setComment(req.getComment().trim());
+    e.setEventDate(eventDate);
+
+    LogEntryEntity saved = logRepository.save(e);
+
+    return new LogResponse(
+        saved.getId(), 
+        saved.getScore(), 
+        saved.getComment(), 
+        saved.getEventDate(), 
+        saved.getCreatedAt()
+    );
+}
+```
+
+<Note>
+See `LogService.java:29` for the complete log creation logic.
+</Note>
+
+## Listing Logs
+
+Logs for a specific row are retrieved in reverse chronological order (newest first):
+
+```java
+public List<LogResponse> list(UUID rowId) {
+    return logRepository
+            .findByOwnerIdAndRowIdOrderByCreatedAtDesc(ownerId(), rowId)
+            .stream()
+            .map(l -> new LogResponse(
+                l.getId(), 
+                l.getScore(), 
+                l.getComment(), 
+                l.getEventDate(), 
+                l.getCreatedAt()
+            ))
+            .toList();
+}
+```
+
+<Note>
+See `LogService.java:52` for log listing implementation.
+</Note>
+
+## Example Log Entries
+
+### Car Viewing Log
+
+```json
+[
+  {
+    "id": "770e8400-e29b-41d4-a716-446655440003",
+    "score": 8.5,
+    "comment": "Fui a ver el coche. El interior está impecable, la pintura tiene algunos arañazos menores. El motor suena muy bien. El vendedor es amable y tiene toda la documentación en orden.",
+    "eventDate": "2024-03-15",
+    "createdAt": "2024-03-15T18:30:00.000Z"
+  },
+  {
+    "id": "880e8400-e29b-41d4-a716-446655440004",
+    "score": 9.0,
+    "comment": "Hice una prueba de conducción. Se maneja increíblemente bien, la transmisión es suave, los frenos responden perfectamente. Definitivamente mi primera opción.",
+    "eventDate": "2024-03-16",
+    "createdAt": "2024-03-16T10:15:00.000Z"
+  },
+  {
+    "id": "990e8400-e29b-41d4-a716-446655440005",
+    "score": 7.0,
+    "comment": "El mecánico revisó el coche. Todo bien excepto que necesitará neumáticos nuevos pronto (están al 40%). El mantenimiento ha sido regular según el historial.",
+    "eventDate": "2024-03-18",
+    "createdAt": "2024-03-18T14:45:00.000Z"
+  }
+]
+```
+
+### Apartment Viewing Log
+
+```json
+[
+  {
+    "id": "aa0e8400-e29b-41d4-a716-446655440006",
+    "score": 6.5,
+    "comment": "Primera visita al apartamento. La ubicación es excelente pero el espacio es más pequeño de lo que esperaba. Necesita algunos arreglos menores en la cocina.",
+    "eventDate": "2024-03-10",
+    "createdAt": "2024-03-10T16:00:00.000Z"
+  },
+  {
+    "id": "bb0e8400-e29b-41d4-a716-446655440007",
+    "score": 7.5,
+    "comment": "Segunda visita con mi pareja. Ella también quedó impresionada con la ubicación. El propietario acordó hacer las reparaciones de la cocina antes de mudarnos.",
+    "eventDate": "2024-03-12",
+    "createdAt": "2024-03-12T11:20:00.000Z"
+  }
+]
+```
+
+## Event Dates vs Created Dates
+
+Logs support two different timestamp concepts:
+
+### `created_at` (Required)
+
+- Automatically set when the log is created
+- Represents **when you recorded** the observation
+- Cannot be modified
+- Always includes time (with millisecond precision)
+
+### `event_date` (Optional)
+
+- Manually set by the user
+- Represents **when the event actually happened**
+- Can be different from `created_at` (e.g., logging a car viewing from yesterday)
+- Date only (no time component)
+- Format: `YYYY-MM-DD`
+
+<Accordion title="Why two dates?">
+This separation allows you to record events retroactively. For example:
+
+- You viewed a car on March 15th but didn't log it until March 17th
+- `event_date`: `2024-03-15` (when the viewing happened)
+- `created_at`: `2024-03-17T20:30:00.000Z` (when you logged it)
+
+This maintains chronological accuracy while preserving the actual timeline of events.
+</Accordion>
+
+## Cascade Deletion
+
+Logs are automatically deleted when their parent row is deleted:
+
+```sql
+CONSTRAINT fk_log_row
+  FOREIGN KEY (row_id) REFERENCES object_row(id)
+    ON DELETE CASCADE
+```
+
+<Warning>
+Deleting a row will permanently delete all associated log entries. This operation cannot be undone.
+</Warning>
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/rows/{rowId}/logs` | Create a new log entry |
+| `GET` | `/api/v1/rows/{rowId}/logs` | List all logs for a row |
+
+<Note>
+Currently, logs are append-only - there are no update or delete endpoints for individual logs.
+</Note>
+
+## Common Workflows
+
+<CardGroup cols={2}>
+  <Card title="Progress Monitoring" icon="arrow-trend-up">
+    Create regular log entries to track how scores change over time
+  </Card>
+  <Card title="Decision Documentation" icon="clipboard">
+    Record your thoughts and observations to justify future decisions
+  </Card>
+  <Card title="Timeline Building" icon="timeline">
+    Use event_date to build accurate chronological histories
+  </Card>
+  <Card title="Comparative Analysis" icon="chart-mixed">
+    Compare scores across different rows to identify best options
+  </Card>
+</CardGroup>
+
+## Best Practices
+
+### Consistent Scoring
+
+Develop a personal scoring rubric and stick to it:
+
+```
+10.00 = Perfect, no issues whatsoever
+8.00-9.99 = Excellent with minor imperfections
+6.00-7.99 = Good, meets requirements
+4.00-5.99 = Acceptable but has notable issues
+2.00-3.99 = Poor, significant problems
+0.00-1.99 = Terrible, deal-breaker issues
+```
+
+### Detailed Comments
+
+Write thorough comments that your future self will understand:
+
+- **Good**: "Apartamento limpio, buena iluminación natural, cerca del metro"
+- **Better**: "Visitado el sábado a las 11am. Apartamento muy limpio, grandes ventanas orientadas al sur con mucha luz natural. A 5 minutos caminando de la estación de metro. Vecinos parecen tranquilos. Único punto negativo: cocina algo antigua pero funcional."
+
+### Use Event Dates
+
+Always set `event_date` when logging past events to maintain accurate timelines.
+
+## Analytics Potential
+
+With log data, you can build analytics features:
+
+- **Average score per row** - Calculate mean score across all logs
+- **Score trends** - Visualize how scores change over time
+- **Best/worst rated items** - Rank rows by their latest or average scores
+- **Event frequency** - Track how often you log updates for different rows
+
+## Related Features
+
+<CardGroup cols={3}>
+  <Card title="Templates" icon="folder-tree" href="/features/templates">
+    Templates contain rows that can be logged
+  </Card>
+  <Card title="Fields" icon="table-columns" href="/features/fields">
+    Fields define the data structure for rows
+  </Card>
+  <Card title="Rows" icon="table-rows" href="/features/rows">
+    Rows are the parent entities that logs track
+  </Card>
+</CardGroup>

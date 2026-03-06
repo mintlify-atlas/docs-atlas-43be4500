@@ -1,0 +1,765 @@
+---
+title: 'Deployment Guide'
+description: 'Deploy Bitácora Universal to production environments'
+---
+
+## Overview
+
+Bitácora Universal can be deployed using various strategies, from simple Docker Compose setups to cloud-native Kubernetes deployments.
+
+<CardGroup cols={3}>
+  <Card title="Docker" icon="docker">
+    Containerized deployment
+  </Card>
+  
+  <Card title="Cloud Platforms" icon="cloud">
+    AWS, GCP, Azure, DigitalOcean
+  </Card>
+  
+  <Card title="Self-Hosted" icon="server">
+    VPS or on-premise servers
+  </Card>
+</CardGroup>
+
+## Prerequisites
+
+Before deploying, ensure you have:
+
+<Card title="Deployment Checklist" icon="list-check">
+  - [x] Java 21 runtime (for backend)
+  - [x] Node.js 18+ (for frontend build)
+  - [x] MySQL 8.4+ database
+  - [x] Docker & Docker Compose (recommended)
+  - [x] Domain name and SSL certificate
+  - [x] Environment-specific configuration
+</Card>
+
+## Local Development Setup
+
+### Using Docker Compose
+
+The easiest way to run the application locally:
+
+```bash
+# Start MySQL database
+docker compose up -d
+
+# Verify database is running
+docker ps
+
+# Check database logs
+docker logs bitacora-mysql
+```
+
+### Docker Compose Configuration
+
+```yaml
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: bitacora-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: bitacora
+      MYSQL_USER: usuario
+      MYSQL_PASSWORD: 123
+      TZ: Europe/Madrid
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./infra/mysql/my.cnf:/etc/mysql/conf.d/my.cnf:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mysql_data:
+```
+
+<Accordion title="MySQL Configuration (my.cnf)">
+```ini
+[mysqld]
+max_connections=50
+innodb_buffer_pool_size=128M
+innodb_log_buffer_size=16M
+innodb_log_file_size=64M
+tmp_table_size=32M
+max_heap_table_size=32M
+
+sql_mode=STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
+character-set-server=utf8mb4
+collation-server=utf8mb4_0900_ai_ci
+```
+</Accordion>
+
+### Running Backend
+
+```bash
+cd backend
+
+# Build with Maven
+./mvnw clean package
+
+# Run the application
+java -jar target/bitacora-universal-0.0.1-SNAPSHOT.jar
+
+# Backend runs on http://localhost:8080
+```
+
+### Running Frontend
+
+```bash
+cd frontend
+
+# Install dependencies
+npm install
+
+# Start development server
+npm run dev
+
+# Frontend runs on http://localhost:5173
+```
+
+## Production Build
+
+### Backend Production Build
+
+```bash
+cd backend
+
+# Create production JAR
+./mvnw clean package -DskipTests
+
+# Output: target/bitacora-universal-0.0.1-SNAPSHOT.jar
+```
+
+<Accordion title="Maven Build Configuration">
+The `pom.xml` includes the Spring Boot Maven plugin for creating executable JARs:
+
+```xml
+<build>
+  <plugins>
+    <plugin>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-maven-plugin</artifactId>
+    </plugin>
+  </plugins>
+</build>
+```
+
+This creates a "fat JAR" with all dependencies included.
+</Accordion>
+
+### Frontend Production Build
+
+```bash
+cd frontend
+
+# Build for production
+npm run build
+
+# Output: dist/ directory
+```
+
+The `dist/` directory contains:
+- Optimized JavaScript bundles
+- Minified CSS
+- Asset files with cache-busting hashes
+- `index.html` entry point
+
+## Environment Configuration
+
+### Backend Configuration
+
+<Accordion title="Production application.properties">
+```properties
+# Server configuration
+server.port=${PORT:8080}
+
+# Database configuration
+spring.datasource.url=${DATABASE_URL}
+spring.datasource.username=${DB_USERNAME}
+spring.datasource.password=${DB_PASSWORD}
+
+# JPA configuration
+spring.jpa.hibernate.ddl-auto=validate
+spring.jpa.show-sql=false
+spring.jpa.properties.hibernate.format_sql=false
+
+# Flyway
+spring.flyway.enabled=true
+spring.flyway.baseline-on-migrate=true
+
+# JWT configuration
+app.jwt.secret=${JWT_SECRET}
+app.jwt.issuer=bitacora-universal
+app.jwt.ttl-seconds=${JWT_TTL_SECONDS:604800}
+
+# Logging
+logging.level.root=INFO
+logging.level.bitacora.bitacorauniversal=INFO
+```
+</Accordion>
+
+<Warning>
+**Security**: Never commit production credentials to version control. Use environment variables or secrets management.
+</Warning>
+
+### Environment Variables
+
+Create a `.env` file for production:
+
+```bash
+# Database
+DATABASE_URL=jdbc:mysql://db-host:3306/bitacora?useSSL=true&serverTimezone=UTC
+DB_USERNAME=bitacora_user
+DB_PASSWORD=secure_password_here
+
+# JWT
+JWT_SECRET=your-256-bit-secret-key-here
+JWT_TTL_SECONDS=604800
+
+# Application
+PORT=8080
+```
+
+### Frontend Environment Configuration
+
+Create `frontend/.env.production`:
+
+```bash
+VITE_API_URL=https://api.yourdomain.com
+```
+
+Update `vite.config.ts`:
+
+```typescript
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    proxy: {
+      '/api': {
+        target: process.env.VITE_API_URL || 'http://localhost:8080',
+        changeOrigin: true
+      }
+    }
+  }
+})
+```
+
+## Containerization
+
+### Backend Dockerfile
+
+```dockerfile
+# backend/Dockerfile
+FROM eclipse-temurin:21-jre
+
+WORKDIR /app
+
+# Copy JAR file
+COPY target/bitacora-universal-*.jar app.jar
+
+# Expose port
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=40s \
+  CMD curl -f http://localhost:8080/health || exit 1
+
+# Run application
+ENTRYPOINT ["java", "-jar", "app.jar"]
+```
+
+### Frontend Dockerfile
+
+```dockerfile
+# frontend/Dockerfile
+
+# Build stage
+FROM node:18-alpine AS builder
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci
+
+COPY . .
+RUN npm run build
+
+# Production stage
+FROM nginx:alpine
+
+COPY --from=builder /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
+```
+
+<Accordion title="nginx.conf">
+```nginx
+server {
+    listen 80;
+    server_name _;
+    
+    root /usr/share/nginx/html;
+    index index.html;
+    
+    # Enable gzip compression
+    gzip on;
+    gzip_types text/css application/javascript application/json;
+    
+    # Frontend routes
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+    
+    # API proxy
+    location /api {
+        proxy_pass http://backend:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    
+    # Cache static assets
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+}
+```
+</Accordion>
+
+### Full Stack Docker Compose
+
+```yaml
+# docker-compose.prod.yml
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USERNAME}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./infra/mysql/my.cnf:/etc/mysql/conf.d/my.cnf:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: jdbc:mysql://mysql:3306/${DB_NAME}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  mysql_data:
+```
+
+## Deployment Strategies
+
+### 1. Single Server Deployment
+
+<Steps>
+  <Step title="Provision a VPS">
+    Recommended specs:
+    - **CPU**: 2+ cores
+    - **RAM**: 4GB+
+    - **Storage**: 20GB+ SSD
+    - **OS**: Ubuntu 22.04 LTS
+  </Step>
+  
+  <Step title="Install Docker">
+    ```bash
+    # Install Docker
+    curl -fsSL https://get.docker.com -o get-docker.sh
+    sudo sh get-docker.sh
+    
+    # Install Docker Compose
+    sudo apt install docker-compose-plugin
+    ```
+  </Step>
+  
+  <Step title="Clone Repository">
+    ```bash
+    git clone https://github.com/yourusername/bitacora-universal.git
+    cd bitacora-universal
+    ```
+  </Step>
+  
+  <Step title="Configure Environment">
+    ```bash
+    # Create .env file
+    cp .env.example .env
+    nano .env  # Edit with production values
+    ```
+  </Step>
+  
+  <Step title="Deploy with Docker Compose">
+    ```bash
+    docker compose -f docker-compose.prod.yml up -d
+    ```
+  </Step>
+</Steps>
+
+### 2. Cloud Platform Deployment
+
+<Accordion title="AWS Elastic Beanstalk">
+```bash
+# Install EB CLI
+pip install awsebcli
+
+# Initialize EB application
+eb init -p docker bitacora-universal
+
+# Create environment
+eb create production-env
+
+# Deploy
+eb deploy
+```
+</Accordion>
+
+<Accordion title="Google Cloud Run">
+```bash
+# Build and push backend
+cd backend
+gcloud builds submit --tag gcr.io/PROJECT_ID/bitacora-backend
+gcloud run deploy bitacora-backend --image gcr.io/PROJECT_ID/bitacora-backend
+
+# Build and push frontend
+cd ../frontend
+gcloud builds submit --tag gcr.io/PROJECT_ID/bitacora-frontend
+gcloud run deploy bitacora-frontend --image gcr.io/PROJECT_ID/bitacora-frontend
+```
+</Accordion>
+
+<Accordion title="DigitalOcean App Platform">
+1. Connect GitHub repository
+2. Configure build settings:
+   - **Backend**: Dockerfile at `backend/Dockerfile`
+   - **Frontend**: Dockerfile at `frontend/Dockerfile`
+3. Add managed database (MySQL)
+4. Configure environment variables
+5. Deploy
+</Accordion>
+
+### 3. Kubernetes Deployment
+
+<Accordion title="Backend Deployment">
+```yaml
+# k8s/backend-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bitacora-backend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: bitacora-backend
+  template:
+    metadata:
+      labels:
+        app: bitacora-backend
+    spec:
+      containers:
+      - name: backend
+        image: your-registry/bitacora-backend:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: db-secret
+              key: url
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: jwt-secret
+              key: secret
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+```
+</Accordion>
+
+## Database Migration
+
+### Initial Setup
+
+Flyway automatically runs migrations on application startup:
+
+```bash
+# Migrations are located in:
+backend/src/main/resources/db/migration/
+├── V1__init.sql          # Initial schema
+└── V2__users.sql         # User authentication
+```
+
+### Manual Migration
+
+```bash
+# Run migrations manually
+./mvnw flyway:migrate
+
+# Check migration status
+./mvnw flyway:info
+
+# Repair migration history
+./mvnw flyway:repair
+```
+
+### Production Migration Strategy
+
+<Card title="Zero-Downtime Migration" icon="database">
+  1. **Backup database** before migration
+  2. **Test migrations** in staging environment
+  3. **Deploy new version** with backward-compatible schema
+  4. **Run migrations** during deployment
+  5. **Monitor application** for errors
+</Card>
+
+## SSL/TLS Configuration
+
+### Using Nginx as Reverse Proxy
+
+```nginx
+server {
+    listen 80;
+    server_name yourdomain.com;
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name yourdomain.com;
+    
+    ssl_certificate /etc/letsencrypt/live/yourdomain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
+    
+    # Modern SSL configuration
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256;
+    
+    location / {
+        proxy_pass http://localhost:80;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+### Let's Encrypt SSL
+
+```bash
+# Install Certbot
+sudo apt install certbot python3-certbot-nginx
+
+# Obtain certificate
+sudo certbot --nginx -d yourdomain.com
+
+# Auto-renewal is configured automatically
+```
+
+## Monitoring & Logging
+
+<CardGroup cols={2}>
+  <Card title="Application Logs" icon="file-lines">
+    ```bash
+    # Docker logs
+    docker logs -f bitacora-backend
+    docker logs -f bitacora-frontend
+    
+    # System logs
+    tail -f /var/log/bitacora/*.log
+    ```
+  </Card>
+  
+  <Card title="Database Monitoring" icon="database">
+    ```bash
+    # MySQL status
+    docker exec bitacora-mysql mysqladmin status
+    
+    # Connection count
+    docker exec bitacora-mysql mysql -e "SHOW STATUS LIKE 'Threads_connected'"
+    ```
+  </Card>
+</CardGroup>
+
+### Health Check Endpoint
+
+```java
+@RestController
+public class HealthController {
+    @GetMapping("/health")
+    public Map<String, String> health() {
+        return Map.of("status", "UP");
+    }
+}
+```
+
+Access at: `http://localhost:8080/health`
+
+## Backup Strategy
+
+### Database Backups
+
+```bash
+# Automated daily backup script
+#!/bin/bash
+BACKUP_DIR=/var/backups/bitacora
+DATE=$(date +%Y%m%d_%H%M%S)
+
+docker exec bitacora-mysql mysqldump \
+  -u usuario -p123 bitacora \
+  > $BACKUP_DIR/bitacora_$DATE.sql
+
+# Compress backup
+gzip $BACKUP_DIR/bitacora_$DATE.sql
+
+# Delete backups older than 30 days
+find $BACKUP_DIR -name "*.sql.gz" -mtime +30 -delete
+```
+
+### Restore from Backup
+
+```bash
+# Restore database
+docker exec -i bitacora-mysql mysql -u usuario -p123 bitacora \
+  < bitacora_backup.sql
+```
+
+## Performance Tuning
+
+<Accordion title="Backend Optimization">
+```properties
+# application.properties
+
+# Connection pool
+spring.datasource.hikari.maximum-pool-size=20
+spring.datasource.hikari.minimum-idle=5
+spring.datasource.hikari.connection-timeout=30000
+
+# JPA performance
+spring.jpa.properties.hibernate.jdbc.batch_size=20
+spring.jpa.properties.hibernate.order_inserts=true
+spring.jpa.properties.hibernate.order_updates=true
+```
+</Accordion>
+
+<Accordion title="MySQL Tuning">
+```ini
+[mysqld]
+max_connections=100
+innodb_buffer_pool_size=512M
+innodb_log_file_size=128M
+innodb_flush_log_at_trx_commit=2
+innodb_flush_method=O_DIRECT
+```
+</Accordion>
+
+<Accordion title="Frontend Optimization">
+- Enable gzip compression
+- Configure CDN for static assets
+- Use HTTP/2
+- Implement service workers for caching
+- Lazy load routes and components
+</Accordion>
+
+## Troubleshooting
+
+<Accordion title="Backend won't start">
+**Check:**
+- Database connection (verify host, port, credentials)
+- Flyway migrations completed successfully
+- JWT secret is configured
+- Port 8080 is not already in use
+
+**Logs:**
+```bash
+docker logs bitacora-backend
+```
+</Accordion>
+
+<Accordion title="Frontend can't reach API">
+**Check:**
+- Backend is running and healthy
+- CORS configuration allows frontend origin
+- API proxy is configured correctly
+- Network connectivity between containers
+
+**Test:**
+```bash
+curl http://localhost:8080/health
+```
+</Accordion>
+
+<Accordion title="Database connection errors">
+**Check:**
+- MySQL container is running
+- Database credentials are correct
+- Database name exists
+- Network connectivity
+
+**Verify:**
+```bash
+docker exec -it bitacora-mysql mysql -u usuario -p123
+```
+</Accordion>
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="sitemap" href="/development/architecture">
+    System architecture and components
+  </Card>
+  
+  <Card title="Database" icon="database" href="/development/database">
+    Database schema and migrations
+  </Card>
+</CardGroup>

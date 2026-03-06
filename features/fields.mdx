@@ -1,0 +1,490 @@
+---
+title: Fields
+description: Define custom columns with dynamic data types
+icon: table-columns
+---
+
+## Overview
+
+Fields are the building blocks that define the structure of your templates. Each field represents a column in your data collection, with its own data type, validation rules, and display properties. Fields give you complete control over what information you capture in each template.
+
+<Info>
+Think of fields as column definitions in a spreadsheet - they determine what kind of data each row can contain.
+</Info>
+
+## Supported Data Types
+
+Bitácora Universal supports five flexible data types:
+
+<CardGroup cols={2}>
+  <Card title="TEXT" icon="font">
+    Store string values like names, descriptions, or any free-form text
+  </Card>
+  <Card title="NUMBER" icon="hashtag">
+    Store numeric values including integers and decimals (e.g., prices, quantities)
+  </Card>
+  <Card title="BOOLEAN" icon="toggle-on">
+    Store true/false values for yes/no questions or binary states
+  </Card>
+  <Card title="DATE" icon="calendar">
+    Store dates in YYYY-MM-DD format for tracking events and deadlines
+  </Card>
+  <Card title="SELECT" icon="list">
+    Store predefined options - users must choose from a configured list
+  </Card>
+</CardGroup>
+
+## Data Structure
+
+### Database Schema
+
+```sql
+CREATE TABLE template_field (
+  id            BINARY(16) NOT NULL,
+  template_id   BINARY(16) NOT NULL,
+  field_key     VARCHAR(60) NOT NULL,
+  label         VARCHAR(120) NOT NULL,
+  data_type     VARCHAR(20) NOT NULL,
+  required      BOOLEAN NOT NULL DEFAULT FALSE,
+  options_json  JSON NULL,
+  order_index   INT NOT NULL DEFAULT 0,
+  created_at    TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at    TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  CONSTRAINT fk_field_template
+    FOREIGN KEY (template_id) REFERENCES template(id)
+      ON DELETE CASCADE,
+  UNIQUE KEY uk_field_template_key (template_id, field_key),
+  KEY ix_field_template_order (template_id, order_index),
+  CONSTRAINT ck_field_datatype
+    CHECK (data_type IN ('TEXT','NUMBER','BOOLEAN','DATE','SELECT'))
+);
+```
+
+<Note>
+The `ON DELETE CASCADE` constraint ensures that when a template is deleted, all its fields are automatically removed.
+</Note>
+
+### Java Entity
+
+```java
+@Entity
+@Table(name = "template_field",
+        uniqueConstraints = @UniqueConstraint(
+          name = "uk_field_template_key", 
+          columnNames = {"template_id", "field_key"}
+        ))
+public class TemplateFieldEntity {
+
+    @Id
+    @Column(name = "id", nullable = false, columnDefinition = "BINARY(16)")
+    private UUID id;
+
+    @Column(name = "template_id", nullable = false, columnDefinition = "BINARY(16)")
+    private UUID templateId;
+
+    @Column(name = "field_key", nullable = false, length = 60)
+    private String fieldKey;
+
+    @Column(name = "label", nullable = false, length = 120)
+    private String label;
+
+    @Column(name = "data_type", nullable = false, length = 20)
+    private String dataType; // TEXT, NUMBER, BOOLEAN, DATE, SELECT
+
+    @Column(name = "required", nullable = false)
+    private boolean required;
+
+    @Column(name = "options_json", columnDefinition = "JSON")
+    private String optionsJson;
+
+    @Column(name = "order_index", nullable = false)
+    private int orderIndex;
+}
+```
+
+<Note>
+See `TemplateFieldEntity.java:10` for the complete entity with lifecycle management.
+</Note>
+
+### TypeScript Type
+
+```typescript
+type Field = {
+  id: string;
+  fieldKey: string;
+  label: string;
+  dataType: string;
+  required: boolean;
+  optionsJson?: string | null;
+  orderIndex: number;
+};
+
+type FieldType = "TEXT" | "NUMBER" | "BOOLEAN" | "DATE" | "SELECT";
+```
+
+### Field Type Enum
+
+The backend uses a Java enum to enforce valid data types:
+
+```java
+public enum FieldType {
+    TEXT, NUMBER, BOOLEAN, DATE, SELECT
+}
+```
+
+## Field Properties
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `id` | UUID | Yes (auto) | Unique identifier |
+| `template_id` | UUID | Yes | Links field to parent template |
+| `field_key` | String | Yes | Internal identifier (no spaces, unique per template) |
+| `label` | String | Yes | Human-readable display name |
+| `data_type` | Enum | Yes | One of: TEXT, NUMBER, BOOLEAN, DATE, SELECT |
+| `required` | Boolean | Yes | Whether the field must be filled in rows |
+| `options_json` | JSON | Conditional | Required for SELECT type, contains array of valid options |
+| `order_index` | Integer | Yes | Display order (lower numbers appear first) |
+
+## User Workflows
+
+### Creating a Field
+
+Users add fields to templates through a modal interface:
+
+1. Navigate to a template detail page
+2. Click "Añadir campo" button
+3. Fill in the field configuration:
+   - **fieldKey**: Internal identifier (e.g., "marca")
+   - **label**: Display name (e.g., "Marca")
+   - **dataType**: Choose from the five supported types
+   - **required**: Toggle whether the field is mandatory
+   - **options**: For SELECT type, enter comma-separated values
+4. Submit to create the field
+
+<Accordion title="Code: Field Creation Form">
+From `NewFieldModal.tsx:36`:
+
+```typescript
+async function submit() {
+  setError(null);
+
+  const cleanFieldKey = fieldKey.trim();
+  const cleanLabel = label.trim();
+
+  if (!cleanFieldKey) {
+    setError("fieldKey es obligatorio.");
+    return;
+  }
+
+  if (!cleanLabel) {
+    setError("label es obligatorio.");
+    return;
+  }
+
+  let optionsJson: string | null = null;
+
+  if (dataType === "SELECT") {
+    const options = optionsText
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean);
+
+    if (options.length === 0) {
+      setError("Para SELECT debes indicar al menos una opción.");
+      return;
+    }
+
+    optionsJson = JSON.stringify(options);
+  }
+
+  await api.post(`/api/v1/templates/${templateId}/fields`, {
+    fieldKey: cleanFieldKey,
+    label: cleanLabel,
+    dataType,
+    required,
+    optionsJson,
+    orderIndex: nextOrderIndex,
+  });
+}
+```
+</Accordion>
+
+### Backend Validation
+
+The backend enforces strict validation rules when creating fields:
+
+```java
+public FieldResponse create(UUID templateId, CreateFieldRequest req) {
+    // Verify template exists and belongs to user
+    templateRepository.findByIdAndOwnerId(templateId, ownerId())
+            .orElseThrow(() -> new ConflictException(
+                "Template no encontrado o no pertenece al usuario"
+            ));
+
+    // Prevent duplicate field keys
+    String key = req.getFieldKey().trim();
+    if (fieldRepository.existsByTemplateIdAndFieldKey(templateId, key)) {
+        throw new ConflictException("Ya existe una columna con ese fieldKey");
+    }
+
+    // Validate data type
+    String typeStr = req.getDataType().trim().toUpperCase();
+    FieldType type = FieldType.valueOf(typeStr);
+
+    // Validate SELECT options
+    String optionsJson = req.getOptionsJson();
+    if (type == FieldType.SELECT) {
+        if (optionsJson == null || optionsJson.isBlank()) {
+            throw new ConflictException(
+                "SELECT requiere optionsJson (array JSON)"
+            );
+        }
+        // Ensure it's a valid JSON array
+        try {
+            JsonNode node = objectMapper.readTree(optionsJson);
+            if (!node.isArray()) throw new IllegalArgumentException(
+                "optionsJson no es array"
+            );
+        } catch (Exception e) {
+            throw new ConflictException(
+                "optionsJson debe ser un array JSON válido, ej: [\"A\",\"B\"]"
+            );
+        }
+    } else {
+        optionsJson = null;
+    }
+
+    // Create and save field
+    TemplateFieldEntity f = new TemplateFieldEntity();
+    f.setTemplateId(templateId);
+    f.setFieldKey(key);
+    f.setLabel(req.getLabel().trim());
+    f.setDataType(type.name());
+    f.setRequired(req.isRequired());
+    f.setOptionsJson(optionsJson);
+    f.setOrderIndex(req.getOrderIndex());
+
+    return fieldRepository.save(f);
+}
+```
+
+<Note>
+See `FieldService.java:31` for the complete field creation implementation.
+</Note>
+
+## Data Type Validation
+
+When users create or update rows, field values are validated against their defined types:
+
+### TEXT Validation
+
+```java
+case TEXT -> {
+    if (!(value instanceof String)) 
+        throw new ConflictException(
+            "Campo " + field.getFieldKey() + " debe ser TEXT"
+        );
+}
+```
+
+### NUMBER Validation
+
+```java
+case NUMBER -> {
+    if (!(value instanceof Number)) 
+        throw new ConflictException(
+            "Campo " + field.getFieldKey() + " debe ser NUMBER"
+        );
+    // Validate it can be converted to BigDecimal
+    new BigDecimal(value.toString());
+}
+```
+
+### BOOLEAN Validation
+
+```java
+case BOOLEAN -> {
+    if (!(value instanceof Boolean)) 
+        throw new ConflictException(
+            "Campo " + field.getFieldKey() + " debe ser BOOLEAN"
+        );
+}
+```
+
+### DATE Validation
+
+```java
+case DATE -> {
+    if (!(value instanceof String)) 
+        throw new ConflictException(
+            "Campo " + field.getFieldKey() + " debe ser DATE (YYYY-MM-DD)"
+        );
+    try { 
+        LocalDate.parse((String) value); 
+    } catch (Exception e) { 
+        throw new ConflictException(
+            "Campo " + field.getFieldKey() + " DATE inválida (YYYY-MM-DD)"
+        ); 
+    }
+}
+```
+
+### SELECT Validation
+
+```java
+case SELECT -> {
+    if (!(value instanceof String)) 
+        throw new ConflictException(
+            "Campo " + field.getFieldKey() + " debe ser SELECT (string)"
+        );
+    
+    String optionsJson = field.getOptionsJson();
+    if (optionsJson == null || optionsJson.isBlank()) {
+        throw new ConflictException(
+            "Campo SELECT sin optionsJson configurado: " + field.getFieldKey()
+        );
+    }
+    
+    try {
+        JsonNode arr = objectMapper.readTree(optionsJson);
+        boolean found = false;
+        for (JsonNode n : arr) {
+            if (n.isTextual() && n.asText().equals(value)) { 
+                found = true; 
+                break; 
+            }
+        }
+        if (!found) 
+            throw new ConflictException(
+                "Valor no permitido para " + field.getFieldKey()
+            );
+    } catch (ConflictException ce) {
+        throw ce;
+    } catch (Exception e) {
+        throw new ConflictException(
+            "optionsJson inválido en campo SELECT: " + field.getFieldKey()
+        );
+    }
+}
+```
+
+<Note>
+See `RowService.java:209` for the complete validation logic.
+</Note>
+
+## Field Ordering
+
+Fields are displayed according to their `order_index` value:
+
+```java
+// Backend retrieval
+List<TemplateFieldEntity> fields = fieldRepository
+    .findByTemplateIdOrderByOrderIndexAsc(templateId);
+```
+
+```typescript
+// Frontend rendering
+data.fields
+  .slice()
+  .sort((a, b) => a.orderIndex - b.orderIndex)
+  .map((f) => <FieldComponent key={f.id} field={f} />)
+```
+
+## Example Field Configurations
+
+### Car Template Fields
+
+```json
+[
+  {
+    "fieldKey": "marca",
+    "label": "Marca",
+    "dataType": "TEXT",
+    "required": true
+  },
+  {
+    "fieldKey": "modelo",
+    "label": "Modelo",
+    "dataType": "TEXT",
+    "required": true
+  },
+  {
+    "fieldKey": "año",
+    "label": "Año",
+    "dataType": "NUMBER",
+    "required": true
+  },
+  {
+    "fieldKey": "precio",
+    "label": "Precio",
+    "dataType": "NUMBER",
+    "required": true
+  },
+  {
+    "fieldKey": "combustible",
+    "label": "Combustible",
+    "dataType": "SELECT",
+    "required": true,
+    "optionsJson": "[\"Gasolina\",\"Diesel\",\"Híbrido\",\"Eléctrico\"]"
+  },
+  {
+    "fieldKey": "visto",
+    "label": "Ya lo he visto",
+    "dataType": "BOOLEAN",
+    "required": false
+  }
+]
+```
+
+## Required Field Enforcement
+
+When `required: true`, the field must be present and non-null in all row operations:
+
+```java
+// Check during row creation
+for (TemplateFieldEntity f : fields) {
+    if (f.isRequired() && !values.containsKey(f.getFieldKey())) {
+        throw new ConflictException(
+            "Falta campo obligatorio: " + f.getFieldKey()
+        );
+    }
+}
+
+// Check during row updates (after merge)
+for (TemplateFieldEntity f : fields) {
+    if (f.isRequired()) {
+        if (!current.containsKey(f.getFieldKey()) || 
+            current.get(f.getFieldKey()) == null) {
+            throw new ConflictException(
+                "Falta campo obligatorio: " + f.getFieldKey()
+            );
+        }
+    }
+}
+```
+
+<Note>
+See `RowService.java:62` and `RowService.java:168` for required field validation.
+</Note>
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/templates/{templateId}/fields` | Create a new field |
+| `GET` | `/api/v1/templates/{templateId}/fields` | List all fields for a template |
+
+## Related Features
+
+<CardGroup cols={3}>
+  <Card title="Templates" icon="folder-tree" href="/features/templates">
+    Create templates that contain fields
+  </Card>
+  <Card title="Rows" icon="table-rows" href="/features/rows">
+    Add data rows that conform to field definitions
+  </Card>
+  <Card title="Logs" icon="clock-rotate-left" href="/features/logs">
+    Track changes to row data over time
+  </Card>
+</CardGroup>

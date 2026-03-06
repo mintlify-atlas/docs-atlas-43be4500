@@ -1,0 +1,732 @@
+---
+title: Installation
+description: Complete installation guide for Bitácora Universal
+---
+
+Detailed instructions for setting up Bitácora Universal in development and production environments.
+
+## System Requirements
+
+### Minimum Requirements
+
+- **Java Development Kit**: OpenJDK 21 or higher
+- **Node.js**: Version 18 or higher
+- **Docker**: Version 20.10 or higher
+- **Docker Compose**: Version 2.0 or higher
+- **Memory**: 2GB RAM minimum (4GB recommended)
+- **Storage**: 500MB for application + database storage
+
+### Recommended Development Tools
+
+- **IntelliJ IDEA** (with Spring Boot plugin)
+- **VS Code** (with Java Extension Pack)
+- **Docker Desktop** (for Mac/Windows)
+- **Postman** or **curl** (for API testing)
+
+## Installing Prerequisites
+
+<Tabs>
+  <Tab title="macOS">
+    Install via Homebrew:
+
+    ```bash
+    # Install Java 21
+    brew install openjdk@21
+
+    # Add to PATH
+    echo 'export PATH="/opt/homebrew/opt/openjdk@21/bin:$PATH"' >> ~/.zshrc
+
+    # Install Node.js
+    brew install node@20
+
+    # Install Docker Desktop
+    brew install --cask docker
+
+    # Verify installations
+    java -version
+    node -v
+    docker --version
+    ```
+  </Tab>
+
+  <Tab title="Linux (Ubuntu/Debian)">
+    ```bash
+    # Update package index
+    sudo apt update
+
+    # Install Java 21
+    sudo apt install openjdk-21-jdk
+
+    # Install Node.js 20
+    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+    sudo apt install -y nodejs
+
+    # Install Docker
+    sudo apt install docker.io docker-compose-v2
+    sudo systemctl start docker
+    sudo usermod -aG docker $USER
+
+    # Verify installations
+    java -version
+    node -v
+    docker --version
+    ```
+  </Tab>
+
+  <Tab title="Windows">
+    1. **Java 21**: Download from [Adoptium](https://adoptium.net/temurin/releases/?version=21)
+    2. **Node.js**: Download from [nodejs.org](https://nodejs.org)
+    3. **Docker Desktop**: Download from [docker.com](https://www.docker.com/products/docker-desktop)
+
+    Verify in PowerShell:
+
+    ```powershell
+    java -version
+    node -v
+    docker --version
+    ```
+  </Tab>
+</Tabs>
+
+## Database Setup
+
+### Docker Compose Configuration
+
+Bitácora Universal uses MySQL 8.4 with custom configuration. The database setup is defined in `docker-compose.yml`:
+
+```yaml
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: bitacora-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: bitacora
+      MYSQL_USER: usuario
+      MYSQL_PASSWORD: 123
+      TZ: Europe/Madrid
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./infra/mysql/my.cnf:/etc/mysql/conf.d/my.cnf:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mysql_data:
+```
+
+<Note>
+  The database runs on port **3307** (mapped from container port 3306) to avoid conflicts with existing MySQL installations.
+</Note>
+
+### MySQL Custom Configuration
+
+The custom MySQL configuration (`infra/mysql/my.cnf`) optimizes for development:
+
+```ini
+[mysqld]
+max_connections=50
+innodb_buffer_pool_size=128M
+innodb_log_buffer_size=16M
+innodb_log_file_size=64M
+tmp_table_size=32M
+max_heap_table_size=32M
+
+sql_mode=STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
+character-set-server=utf8mb4
+collation-server=utf8mb4_0900_ai_ci
+```
+
+### Starting the Database
+
+<Steps>
+  <Step title="Launch MySQL Container">
+    ```bash
+    docker compose up -d
+    ```
+
+    This command:
+    - Downloads the MySQL 8.4 image (if not cached)
+    - Creates a persistent volume for data storage
+    - Starts the container in detached mode
+  </Step>
+
+  <Step title="Verify Database Status">
+    Check that the container is healthy:
+
+    ```bash
+    docker compose ps
+    ```
+
+    Expected output:
+    ```
+    NAME              IMAGE       STATUS         PORTS
+    bitacora-mysql    mysql:8.4   Up (healthy)   0.0.0.0:3307->3306/tcp
+    ```
+  </Step>
+
+  <Step title="View Logs (Optional)">
+    Monitor database startup:
+
+    ```bash
+    docker compose logs -f mysql
+    ```
+
+    Press `Ctrl+C` to stop following logs.
+  </Step>
+</Steps>
+
+<Warning>
+  **Production Warning**: The default credentials (`usuario`/`123`) are for development only. Always use strong passwords and environment variables in production.
+</Warning>
+
+## Backend Setup
+
+### Project Structure
+
+The backend follows hexagonal architecture:
+
+```
+backend/
+├── src/main/java/bitacora/bitacorauniversal/
+│   ├── application/       # Business logic & services
+│   ├── config/            # Spring configuration
+│   ├── infrastructure/    # Database repositories
+│   ├── security/          # JWT & authentication
+│   ├── shared/            # Common utilities
+│   └── web/              # REST controllers
+│       ├── auth/         # Login & registration
+│       ├── template/     # Template CRUD
+│       ├── log/          # Log entries
+│       └── dto/          # Data transfer objects
+└── src/main/resources/
+    ├── application.properties
+    └── db/migration/     # Flyway SQL scripts
+```
+
+### Configuration
+
+The backend configuration is in `backend/src/main/resources/application.properties`:
+
+```properties
+server.port=8080
+
+spring.datasource.url=jdbc:mysql://127.0.0.1:3307/bitacora?useUnicode=true&characterEncoding=utf8&serverTimezone=Europe/Madrid
+spring.datasource.username=usuario
+spring.datasource.password=123
+
+spring.jpa.hibernate.ddl-auto=validate
+spring.flyway.enabled=true
+app.jwt.secret=TorremolinosMalag@321canelaYmilo
+app.jwt.issuer=bitacora-universal
+app.jwt.ttl-seconds=604800
+```
+
+<Note>
+  - **JWT TTL**: 604800 seconds = 7 days
+  - **Hibernate DDL**: Set to `validate` - schema is managed by Flyway
+  - **Timezone**: Europe/Madrid (adjust for your region)
+</Note>
+
+### Database Migrations
+
+Flyway automatically runs migrations on startup. The schema is defined in:
+
+#### V1__init.sql - Core Tables
+
+```sql
+CREATE TABLE template (
+    id            BINARY(16) NOT NULL,
+    owner_id      VARCHAR(64) NOT NULL,
+    name          VARCHAR(120) NOT NULL,
+    description   VARCHAR(500) NULL,
+    created_at    TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at    TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_template_owner_name (owner_id, name)
+);
+
+CREATE TABLE template_field (
+    id            BINARY(16) NOT NULL,
+    template_id   BINARY(16) NOT NULL,
+    field_key     VARCHAR(60) NOT NULL,
+    label         VARCHAR(120) NOT NULL,
+    data_type     VARCHAR(20) NOT NULL,
+    required      BOOLEAN NOT NULL DEFAULT FALSE,
+    options_json  JSON NULL,
+    order_index   INT NOT NULL DEFAULT 0,
+    created_at    TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at    TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (id),
+    CONSTRAINT fk_field_template FOREIGN KEY (template_id) REFERENCES template(id) ON DELETE CASCADE,
+    CONSTRAINT ck_field_datatype CHECK (data_type IN ('TEXT','NUMBER','BOOLEAN','DATE','SELECT'))
+);
+
+CREATE TABLE object_row (
+    id            BINARY(16) NOT NULL,
+    owner_id      VARCHAR(64) NOT NULL,
+    template_id   BINARY(16) NOT NULL,
+    display_name  VARCHAR(160) NOT NULL,
+    values_json   JSON NOT NULL,
+    created_at    TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at    TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (id),
+    CONSTRAINT fk_row_template FOREIGN KEY (template_id) REFERENCES template(id) ON DELETE CASCADE
+);
+
+CREATE TABLE log_entry (
+    id            BINARY(16) NOT NULL,
+    owner_id      VARCHAR(64) NOT NULL,
+    row_id        BINARY(16) NOT NULL,
+    score         DECIMAL(4,2) NOT NULL,
+    comment       TEXT NOT NULL,
+    event_date    DATE NULL,
+    created_at    TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (id),
+    CONSTRAINT fk_log_row FOREIGN KEY (row_id) REFERENCES object_row(id) ON DELETE CASCADE,
+    CONSTRAINT ck_log_score_range CHECK (score >= 0.00 AND score <= 10.00)
+);
+```
+
+#### V2__users.sql - Authentication
+
+```sql
+CREATE TABLE app_user (
+  id BINARY(16) NOT NULL,
+  email VARCHAR(190) NOT NULL,
+  password_hash VARCHAR(100) NOT NULL,
+  created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_app_user_email (email)
+);
+```
+
+### Building the Backend
+
+<Steps>
+  <Step title="Navigate to Backend Directory">
+    ```bash
+    cd backend
+    ```
+  </Step>
+
+  <Step title="Build with Maven">
+    ```bash
+    ./mvnw clean install
+    ```
+
+    This compiles the code, runs tests, and creates a JAR file.
+  </Step>
+
+  <Step title="Run the Application">
+    ```bash
+    ./mvnw spring-boot:run
+    ```
+
+    Or run the JAR directly:
+
+    ```bash
+    java -jar target/bitacora-universal-0.0.1-SNAPSHOT.jar
+    ```
+  </Step>
+
+  <Step title="Verify Backend is Running">
+    Test the health endpoint:
+
+    ```bash
+    curl http://localhost:8080/health
+    ```
+
+    Expected response:
+    ```json
+    {"status":"UP"}
+    ```
+  </Step>
+</Steps>
+
+### Dependencies
+
+Key dependencies from `pom.xml`:
+
+```xml
+<dependencies>
+    <!-- Spring Boot 4.0.3 -->
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-data-jpa</artifactId>
+    </dependency>
+    
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-security</artifactId>
+    </dependency>
+    
+    <!-- JWT 0.12.6 -->
+    <dependency>
+        <groupId>io.jsonwebtoken</groupId>
+        <artifactId>jjwt-api</artifactId>
+        <version>0.12.6</version>
+    </dependency>
+    
+    <!-- Flyway Migrations -->
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-flyway</artifactId>
+    </dependency>
+    
+    <!-- MySQL 8 Driver -->
+    <dependency>
+        <groupId>com.mysql</groupId>
+        <artifactId>mysql-connector-j</artifactId>
+    </dependency>
+</dependencies>
+```
+
+## Frontend Setup
+
+### Project Structure
+
+```
+frontend/
+├── src/
+│   ├── components/       # Reusable UI components
+│   │   ├── ui.tsx       # Button, Card, Modal
+│   │   ├── NewTemplateModal.tsx
+│   │   └── NewFieldModal.tsx
+│   ├── lib/
+│   │   ├── api.ts       # API client & auth
+│   │   └── types.ts     # TypeScript interfaces
+│   ├── pages/
+│   │   ├── Login.tsx
+│   │   └── TemplateDetailPage.tsx
+│   ├── App.tsx          # Main application
+│   ├── main.tsx         # Entry point
+│   └── index.css        # Tailwind styles
+├── package.json
+├── vite.config.ts
+└── tailwind.config.js
+```
+
+### Dependencies
+
+From `frontend/package.json`:
+
+```json
+{
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.1.1",
+    "@tailwindcss/postcss": "^4.2.1",
+    "tailwindcss": "^4.2.1",
+    "typescript": "~5.9.3",
+    "vite": "^7.3.1"
+  }
+}
+```
+
+### API Client Configuration
+
+The API client (`frontend/src/lib/api.ts`) handles authentication:
+
+```typescript
+const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8080";
+const TOKEN_KEY = "bitacora_token";
+
+export function getToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function setToken(token: string): void {
+  localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function clearToken(): void {
+  localStorage.removeItem(TOKEN_KEY);
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+
+  if (init.body && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  const token = getToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+
+  const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    const msg = body?.detail || body?.message || res.statusText || `${res.status}`;
+    throw new Error(msg);
+  }
+
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+export const api = {
+  get: <T>(path: string) => request<T>(path),
+  post: <T>(path: string, body: unknown) =>
+      request<T>(path, { method: "POST", body: JSON.stringify(body) }),
+  patch: <T>(path: string, body: unknown) =>
+      request<T>(path, { method: "PATCH", body: JSON.stringify(body) }),
+  del: <T>(path: string) => request<T>(path, { method: "DELETE" }),
+};
+```
+
+### Installing and Running
+
+<Steps>
+  <Step title="Navigate to Frontend Directory">
+    ```bash
+    cd frontend
+    ```
+  </Step>
+
+  <Step title="Install Dependencies">
+    ```bash
+    npm install
+    ```
+
+    This installs React, Vite, Tailwind CSS, and all dev dependencies.
+  </Step>
+
+  <Step title="Start Development Server">
+    ```bash
+    npm run dev
+    ```
+
+    The app will be available at **http://localhost:5173**
+  </Step>
+
+  <Step title="Build for Production">
+    ```bash
+    npm run build
+    ```
+
+    Production files will be in `frontend/dist/`
+  </Step>
+</Steps>
+
+### Environment Variables
+
+Create `frontend/.env` for custom configuration:
+
+```bash
+# Backend API URL
+VITE_API_BASE=http://localhost:8080
+
+# Or for production
+VITE_API_BASE=https://api.your-domain.com
+```
+
+<Warning>
+  Environment variables must be prefixed with `VITE_` to be exposed to the client.
+</Warning>
+
+## Authentication Flow
+
+Bitácora uses JWT for authentication:
+
+### Registration
+
+```bash
+curl -X POST http://localhost:8080/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "securePassword123"
+  }'
+```
+
+Response:
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+### Login
+
+```bash
+curl -X POST http://localhost:8080/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "securePassword123"
+  }'
+```
+
+### Using the Token
+
+Include the JWT in the Authorization header:
+
+```bash
+curl http://localhost:8080/api/v1/templates \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+## Production Deployment
+
+### Environment Variables
+
+For production, use environment variables instead of hardcoded values:
+
+```bash
+# Database
+export SPRING_DATASOURCE_URL=jdbc:mysql://prod-db:3306/bitacora
+export SPRING_DATASOURCE_USERNAME=prod_user
+export SPRING_DATASOURCE_PASSWORD=strong_password_here
+
+# JWT Secret (generate a strong random string)
+export APP_JWT_SECRET=$(openssl rand -base64 32)
+export APP_JWT_ISSUER=bitacora-production
+export APP_JWT_TTL_SECONDS=604800
+
+# Server
+export SERVER_PORT=8080
+```
+
+### Building for Production
+
+<CodeGroup>
+```bash Backend JAR
+cd backend
+./mvnw clean package -DskipTests
+java -jar target/bitacora-universal-0.0.1-SNAPSHOT.jar
+```
+
+```bash Frontend Build
+cd frontend
+npm run build
+# Serve the dist/ folder with nginx or any static host
+```
+
+```dockerfile Docker (Backend)
+FROM eclipse-temurin:21-jre-alpine
+WORKDIR /app
+COPY target/bitacora-universal-0.0.1-SNAPSHOT.jar app.jar
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "app.jar"]
+```
+
+```dockerfile Docker (Frontend)
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM nginx:alpine
+COPY --from=builder /app/dist /usr/share/nginx/html
+EXPOSE 80
+```
+</CodeGroup>
+
+### Security Checklist
+
+<Steps>
+  <Step title="Change Default Credentials">
+    - Update MySQL root password
+    - Use strong application database credentials
+    - Generate a secure JWT secret (minimum 32 characters)
+  </Step>
+
+  <Step title="Enable HTTPS">
+    - Use a reverse proxy (nginx, Caddy, Traefik)
+    - Obtain SSL certificates (Let's Encrypt)
+    - Redirect HTTP to HTTPS
+  </Step>
+
+  <Step title="Configure CORS">
+    Update backend to allow only your frontend domain:
+
+    ```java
+    @CrossOrigin(origins = "https://your-domain.com")
+    ```
+  </Step>
+
+  <Step title="Database Security">
+    - Use SSL for database connections
+    - Restrict network access to database
+    - Enable regular backups
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+### Backend Won't Start
+
+<CodeGroup>
+```bash Check Java Version
+java -version
+# Must be 21 or higher
+```
+
+```bash Check Database Connection
+docker compose ps
+mysql -h 127.0.0.1 -P 3307 -u usuario -p123 -D bitacora
+```
+
+```bash View Backend Logs
+./mvnw spring-boot:run | tee backend.log
+```
+</CodeGroup>
+
+### Frontend Build Errors
+
+```bash
+# Clear node_modules and reinstall
+rm -rf node_modules package-lock.json
+npm install
+
+# Check Node version
+node -v
+# Must be 18 or higher
+```
+
+### Database Migration Failures
+
+```bash
+# Reset database (CAUTION: destroys data)
+docker compose down -v
+docker compose up -d
+
+# Migrations will run automatically on next backend start
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart Guide" icon="rocket" href="/quickstart">
+    Create your first template in minutes
+  </Card>
+  
+  <Card title="API Documentation" icon="book" href="/api/overview">
+    Explore all REST endpoints
+  </Card>
+  
+  <Card title="Data Model" icon="database" href="/development/database">
+    Understand templates, fields, rows, and logs
+  </Card>
+  
+  <Card title="Authentication" icon="shield" href="/guides/authentication">
+    JWT configuration and user management
+  </Card>
+</CardGroup>

@@ -1,0 +1,683 @@
+---
+title: 'Frontend Development'
+description: 'React frontend architecture, components, and development workflow'
+---
+
+## Overview
+
+The Bitácora Universal frontend is a **modern React application** built with TypeScript, Vite, and Tailwind CSS. It provides a responsive, type-safe interface for managing templates and logs.
+
+<CardGroup cols={3}>
+  <Card title="React 19.2" icon="react">
+    Latest React features with hooks
+  </Card>
+  
+  <Card title="TypeScript 5.9" icon="code">
+    Type-safe development
+  </Card>
+  
+  <Card title="Vite 7.3" icon="bolt">
+    Lightning-fast builds
+  </Card>
+</CardGroup>
+
+## Technology Stack
+
+### Core Dependencies
+
+```json
+{
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.1.1",
+    "typescript": "~5.9.3",
+    "vite": "^7.3.1",
+    "tailwindcss": "^4.2.1",
+    "eslint": "^9.39.1"
+  }
+}
+```
+
+### Build Tools
+
+<Accordion title="Vite Configuration">
+```typescript
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    proxy: {
+      '/api': 'http://localhost:8080'
+    }
+  }
+})
+```
+
+Vite provides:
+- **Fast HMR** (Hot Module Replacement)
+- **Optimized builds** with code splitting
+- **API proxy** for development
+</Accordion>
+
+<Accordion title="TypeScript Configuration">
+```json
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true
+  }
+}
+```
+
+Strict mode enabled for maximum type safety.
+</Accordion>
+
+## Project Structure
+
+```
+frontend/src/
+├── pages/                  # Route-level components
+│   ├── Login.tsx          # Authentication page
+│   └── TemplateDetailPage.tsx  # Template management
+├── components/             # Reusable components
+│   ├── ui.tsx             # Base UI components
+│   ├── NewTemplateModal.tsx
+│   └── NewFieldModal.tsx
+├── lib/                    # Utilities & API client
+├── assets/                 # Static resources (images, icons)
+├── App.tsx                 # Main application component
+├── App.css                 # Global styles
+├── main.tsx                # Application entry point
+└── index.css               # Tailwind directives
+```
+
+### Directory Conventions
+
+<Card title="Component Organization" icon="folder-tree">
+  - **Pages**: Top-level route components
+  - **Components**: Reusable UI components
+  - **Lib**: Business logic, API clients, utilities
+  - **Assets**: Static files (images, fonts, icons)
+</Card>
+
+## Component Architecture
+
+### Application Entry Point
+
+```typescript
+// main.tsx
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import App from './App.tsx'
+import './index.css'
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+)
+```
+
+### Main Application Component
+
+The `App.tsx` component handles:
+- **Routing** (if using React Router)
+- **Authentication state**
+- **Layout structure**
+- **Global state management**
+
+```typescript
+function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  
+  useEffect(() => {
+    // Check for existing JWT token
+    const token = localStorage.getItem('jwt');
+    if (token) {
+      setIsAuthenticated(true);
+    }
+  }, []);
+  
+  return isAuthenticated ? <MainApp /> : <Login />;
+}
+```
+
+## Component Patterns
+
+### Page Components
+
+<Accordion title="Login.tsx">
+Handles user authentication with form validation:
+
+```typescript
+import { useState } from 'react';
+
+function Login() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    try {
+      const response = await fetch('/api/v1/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      
+      if (response.ok) {
+        const { token } = await response.json();
+        localStorage.setItem('jwt', token);
+        window.location.reload();
+      } else {
+        setError('Invalid credentials');
+      }
+    } catch (err) {
+      setError('Network error');
+    }
+  };
+  
+  return (
+    <form onSubmit={handleLogin}>
+      {/* Form fields */}
+    </form>
+  );
+}
+```
+</Accordion>
+
+<Accordion title="TemplateDetailPage.tsx">
+Manages template creation and field configuration:
+
+```typescript
+interface Template {
+  id: string;
+  name: string;
+  description: string;
+  fields: Field[];
+}
+
+interface Field {
+  id: string;
+  key: string;
+  label: string;
+  dataType: 'TEXT' | 'NUMBER' | 'BOOLEAN' | 'DATE' | 'SELECT';
+  required: boolean;
+}
+
+function TemplateDetailPage() {
+  const [template, setTemplate] = useState<Template | null>(null);
+  const [loading, setLoading] = useState(true);
+  
+  useEffect(() => {
+    fetchTemplate();
+  }, []);
+  
+  // Component logic
+}
+```
+</Accordion>
+
+### Reusable Components
+
+<Accordion title="ui.tsx - Base Components">
+Provides foundational UI components:
+
+```typescript
+export function Button({
+  children,
+  variant = 'primary',
+  onClick,
+  ...props
+}: ButtonProps) {
+  const baseClasses = 'px-4 py-2 rounded font-medium';
+  const variantClasses = {
+    primary: 'bg-blue-600 text-white hover:bg-blue-700',
+    secondary: 'bg-gray-200 text-gray-800 hover:bg-gray-300',
+    danger: 'bg-red-600 text-white hover:bg-red-700'
+  };
+  
+  return (
+    <button
+      className={`${baseClasses} ${variantClasses[variant]}`}
+      onClick={onClick}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+export function Input({ label, error, ...props }: InputProps) {
+  return (
+    <div className="mb-4">
+      {label && <label className="block mb-2">{label}</label>}
+      <input
+        className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2"
+        {...props}
+      />
+      {error && <span className="text-red-600 text-sm">{error}</span>}
+    </div>
+  );
+}
+```
+</Accordion>
+
+<Accordion title="NewTemplateModal.tsx">
+Modal component for creating new templates:
+
+```typescript
+interface NewTemplateModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSubmit: (template: CreateTemplateRequest) => void;
+}
+
+function NewTemplateModal({ isOpen, onClose, onSubmit }: NewTemplateModalProps) {
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  
+  const handleSubmit = () => {
+    onSubmit({ name, description });
+    setName('');
+    setDescription('');
+    onClose();
+  };
+  
+  if (!isOpen) return null;
+  
+  return (
+    <div className="modal-overlay">
+      <div className="modal-content">
+        {/* Modal UI */}
+      </div>
+    </div>
+  );
+}
+```
+</Accordion>
+
+## State Management
+
+### React Hooks
+
+The application uses React hooks for state management:
+
+<CardGroup cols={2}>
+  <Card title="useState" icon="database">
+    Component-local state for UI interactions
+  </Card>
+  
+  <Card title="useEffect" icon="rotate">
+    Side effects like data fetching and subscriptions
+  </Card>
+  
+  <Card title="useCallback" icon="bolt">
+    Memoized callbacks for performance
+  </Card>
+  
+  <Card title="useMemo" icon="microchip">
+    Expensive computation caching
+  </Card>
+</CardGroup>
+
+### Authentication State
+
+```typescript
+// JWT token stored in localStorage
+const token = localStorage.getItem('jwt');
+
+// Set token on login
+localStorage.setItem('jwt', token);
+
+// Clear token on logout
+localStorage.removeItem('jwt');
+```
+
+<Warning>
+**Security Note**: JWT tokens in localStorage are vulnerable to XSS attacks. Consider using httpOnly cookies in production.
+</Warning>
+
+## API Integration
+
+### Fetch API Pattern
+
+```typescript
+// lib/api.ts
+const API_BASE = '/api/v1';
+
+export async function apiRequest<T>(
+  endpoint: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const token = localStorage.getItem('jwt');
+  
+  const response = await fetch(`${API_BASE}${endpoint}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token && { Authorization: `Bearer ${token}` }),
+      ...options.headers,
+    },
+  });
+  
+  if (!response.ok) {
+    throw new Error(`API Error: ${response.statusText}`);
+  }
+  
+  return response.json();
+}
+
+// Usage
+export const getTemplates = () => 
+  apiRequest<Template[]>('/templates');
+
+export const createTemplate = (data: CreateTemplateRequest) =>
+  apiRequest<Template>('/templates', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+```
+
+### Error Handling
+
+```typescript
+try {
+  const templates = await getTemplates();
+  setTemplates(templates);
+} catch (error) {
+  console.error('Failed to fetch templates:', error);
+  setError('Unable to load templates. Please try again.');
+}
+```
+
+## Styling with Tailwind CSS
+
+### Configuration
+
+```javascript
+// tailwind.config.js
+export default {
+  content: [
+    "./index.html",
+    "./src/**/*.{js,ts,jsx,tsx}",
+  ],
+  theme: {
+    extend: {},
+  },
+  plugins: [],
+}
+```
+
+### Global Styles
+
+```css
+/* index.css */
+@import 'tailwindcss';
+
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  place-items: center;
+  min-width: 320px;
+  min-height: 100vh;
+}
+```
+
+### Utility-First Approach
+
+```typescript
+// Example component with Tailwind classes
+function Card({ title, children }: CardProps) {
+  return (
+    <div className="bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow">
+      <h3 className="text-xl font-semibold mb-4 text-gray-800">
+        {title}
+      </h3>
+      <div className="text-gray-600">
+        {children}
+      </div>
+    </div>
+  );
+}
+```
+
+## Development Workflow
+
+### Local Development
+
+```bash
+# Install dependencies
+npm install
+
+# Start development server (with HMR)
+npm run dev
+
+# Server runs on http://localhost:5173
+```
+
+### Building for Production
+
+```bash
+# Type check
+npm run build  # Runs: tsc -b && vite build
+
+# Preview production build
+npm run preview
+
+# Lint code
+npm run lint
+```
+
+### Development Server Features
+
+<CardGroup cols={2}>
+  <Card title="Hot Module Replacement" icon="fire">
+    Instant updates without full page reload
+  </Card>
+  
+  <Card title="API Proxy" icon="network-wired">
+    Proxies `/api` requests to backend at port 8080
+  </Card>
+  
+  <Card title="TypeScript Checking" icon="check">
+    Real-time type checking in editor
+  </Card>
+  
+  <Card title="ESLint" icon="code-check">
+    Code quality and style enforcement
+  </Card>
+</CardGroup>
+
+## TypeScript Best Practices
+
+### Interface Definitions
+
+```typescript
+// Define clear interfaces for data models
+interface User {
+  id: string;
+  email: string;
+  createdAt: string;
+}
+
+interface Template {
+  id: string;
+  ownerId: string;
+  name: string;
+  description?: string;  // Optional field
+  fields: TemplateField[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface TemplateField {
+  id: string;
+  templateId: string;
+  key: string;
+  label: string;
+  dataType: DataType;
+  required: boolean;
+  options?: string[];  // For SELECT fields
+}
+
+type DataType = 'TEXT' | 'NUMBER' | 'BOOLEAN' | 'DATE' | 'SELECT';
+```
+
+### Component Props
+
+```typescript
+// Use interfaces for component props
+interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: 'primary' | 'secondary' | 'danger';
+  loading?: boolean;
+}
+
+function Button({ variant = 'primary', loading, children, ...props }: ButtonProps) {
+  return (
+    <button {...props}>
+      {loading ? 'Loading...' : children}
+    </button>
+  );
+}
+```
+
+### Type Guards
+
+```typescript
+function isTemplate(obj: any): obj is Template {
+  return (
+    typeof obj === 'object' &&
+    typeof obj.id === 'string' &&
+    typeof obj.name === 'string' &&
+    Array.isArray(obj.fields)
+  );
+}
+```
+
+## Performance Optimization
+
+<Accordion title="Code Splitting">
+```typescript
+import { lazy, Suspense } from 'react';
+
+const TemplateDetailPage = lazy(() => import('./pages/TemplateDetailPage'));
+
+function App() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <TemplateDetailPage />
+    </Suspense>
+  );
+}
+```
+</Accordion>
+
+<Accordion title="Memoization">
+```typescript
+import { memo, useMemo } from 'react';
+
+// Memoize expensive computations
+const sortedTemplates = useMemo(() => {
+  return templates.sort((a, b) => 
+    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+}, [templates]);
+
+// Memoize components
+const TemplateCard = memo(function TemplateCard({ template }: Props) {
+  return <div>{template.name}</div>;
+});
+```
+</Accordion>
+
+<Accordion title="Debouncing">
+```typescript
+import { useState, useEffect } from 'react';
+
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+  
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
+    
+    return () => clearTimeout(handler);
+  }, [value, delay]);
+  
+  return debouncedValue;
+}
+
+// Usage for search input
+const searchTerm = useDebounce(inputValue, 300);
+```
+</Accordion>
+
+## Testing
+
+### Unit Testing Setup
+
+```bash
+npm install --save-dev vitest @testing-library/react @testing-library/jest-dom
+```
+
+```typescript
+// Button.test.tsx
+import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
+import Button from './Button';
+
+describe('Button', () => {
+  it('renders with text', () => {
+    render(<Button>Click me</Button>);
+    expect(screen.getByText('Click me')).toBeInTheDocument();
+  });
+  
+  it('calls onClick when clicked', () => {
+    const handleClick = vi.fn();
+    render(<Button onClick={handleClick}>Click me</Button>);
+    fireEvent.click(screen.getByText('Click me'));
+    expect(handleClick).toHaveBeenCalledTimes(1);
+  });
+});
+```
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="sitemap" href="/development/architecture">
+    Overall system architecture and design patterns
+  </Card>
+  
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Backend API endpoints for integration
+  </Card>
+  
+  <Card title="Deployment" icon="rocket" href="/development/deployment">
+    Building and deploying the frontend
+  </Card>
+</CardGroup>

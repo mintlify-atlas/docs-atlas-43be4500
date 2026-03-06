@@ -1,0 +1,519 @@
+---
+title: Rows
+description: Store and manage structured data records
+icon: table-rows
+---
+
+## Overview
+
+Rows are the actual data records you create within templates. Each row represents a single item or entry in your collection - a specific car, a particular apartment, one job application, etc. Rows store their data as JSON, conforming to the field structure defined by their parent template.
+
+<Info>
+If templates are like database tables and fields are like columns, then rows are the actual records - the data itself.
+</Info>
+
+## Key Characteristics
+
+<CardGroup cols={2}>
+  <Card title="Dynamic Schema" icon="wand-magic-sparkles">
+    Row structure is determined by template fields - add new fields and all rows adapt
+  </Card>
+  <Card title="JSON Storage" icon="brackets-curly">
+    Field values are stored as JSON for maximum flexibility
+  </Card>
+  <Card title="Type Safety" icon="shield-check">
+    All values are validated against field data types
+  </Card>
+  <Card title="Partial Updates" icon="pen-to-square">
+    Use PATCH to update only specific fields without resending all data
+  </Card>
+</CardGroup>
+
+## Data Structure
+
+### Database Schema
+
+```sql
+CREATE TABLE object_row (
+  id            BINARY(16) NOT NULL,
+  owner_id      VARCHAR(64) NOT NULL,
+  template_id   BINARY(16) NOT NULL,
+  display_name  VARCHAR(160) NOT NULL,
+  values_json   JSON NOT NULL,
+  created_at    TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at    TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  CONSTRAINT fk_row_template
+    FOREIGN KEY (template_id) REFERENCES template(id)
+      ON DELETE CASCADE,
+  KEY ix_row_owner_template_created (owner_id, template_id, created_at)
+);
+```
+
+<Note>
+The `values_json` column stores all field data as a JSON object, enabling dynamic schemas without migrations.
+</Note>
+
+### Java Entity
+
+```java
+@Entity
+@Table(name = "object_row")
+public class ObjectRowEntity {
+
+    @Id
+    @Column(name = "id", nullable = false, columnDefinition = "BINARY(16)")
+    private UUID id;
+
+    @Column(name = "owner_id", nullable = false, length = 64)
+    private String ownerId;
+
+    @Column(name = "template_id", nullable = false, columnDefinition = "BINARY(16)")
+    private UUID templateId;
+
+    @Column(name = "display_name", nullable = false, length = 160)
+    private String displayName;
+
+    @Column(name = "values_json", nullable = false, columnDefinition = "JSON")
+    private String valuesJson;
+
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private Instant createdAt;
+
+    @Column(name = "updated_at", nullable = false)
+    private Instant updatedAt;
+}
+```
+
+<Note>
+See `ObjectRowEntity.java:9` for the complete entity implementation.
+</Note>
+
+### TypeScript Type
+
+```typescript
+type RowResponse = {
+  id: string;
+  displayName: string;
+  values: Record<string, any>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type CreateRowRequest = {
+  displayName: string;
+  values: Record<string, any>;
+};
+
+type PatchRowRequest = {
+  displayName?: string;
+  values?: Record<string, any>;
+};
+```
+
+## Row Properties
+
+| Property | Type | Required | Max Length | Description |
+|----------|------|----------|------------|-------------|
+| `id` | UUID | Yes (auto) | 16 bytes | Unique identifier |
+| `owner_id` | String | Yes | 64 chars | User who owns this row |
+| `template_id` | UUID | Yes | 16 bytes | Parent template |
+| `display_name` | String | Yes | 160 chars | Human-readable identifier |
+| `values_json` | JSON | Yes | - | Field data as JSON object |
+| `created_at` | Timestamp | Yes (auto) | - | Creation timestamp |
+| `updated_at` | Timestamp | Yes (auto) | - | Last update timestamp |
+
+## Creating Rows
+
+### Prerequisites
+
+Before creating rows, the template must have at least one field defined:
+
+```java
+List<TemplateFieldEntity> fields = fieldRepository
+    .findByTemplateIdOrderByOrderIndexAsc(templateId);
+    
+if (fields.isEmpty()) {
+    throw new ConflictException(
+        "No puedes crear filas: el template no tiene columnas definidas"
+    );
+}
+```
+
+<Note>
+See `RowService.java:43` for the field existence check.
+</Note>
+
+### Validation Rules
+
+When creating a row, the service validates:
+
+1. **Template ownership** - Template must exist and belong to the user
+2. **Field existence** - Template must have at least one field
+3. **Valid keys** - All keys in `values` must match existing field keys
+4. **Required fields** - All required fields must be present
+5. **Type validation** - Each value must match its field's data type
+
+### Creation Example
+
+```java
+public RowResponse create(UUID templateId, CreateRowRequest req) {
+    // Verify template exists and belongs to user
+    templateRepository.findByIdAndOwnerId(templateId, ownerId())
+            .orElseThrow(() -> new ConflictException(
+                "Template no encontrado o no pertenece al usuario"
+            ));
+
+    // Load field definitions
+    List<TemplateFieldEntity> fields = fieldRepository
+            .findByTemplateIdOrderByOrderIndexAsc(templateId);
+    if (fields.isEmpty()) {
+        throw new ConflictException(
+            "No puedes crear filas: el template no tiene columnas definidas"
+        );
+    }
+
+    // Build field lookup map
+    Map<String, TemplateFieldEntity> fieldMap = new HashMap<>();
+    for (TemplateFieldEntity f : fields) 
+        fieldMap.put(f.getFieldKey(), f);
+
+    Map<String, Object> values = req.getValues();
+
+    // Validate no unknown keys
+    for (String key : values.keySet()) {
+        if (!fieldMap.containsKey(key)) {
+            throw new ConflictException(
+                "Campo no permitido en values: " + key
+            );
+        }
+    }
+
+    // Validate all required fields are present
+    for (TemplateFieldEntity f : fields) {
+        if (f.isRequired() && !values.containsKey(f.getFieldKey())) {
+            throw new ConflictException(
+                "Falta campo obligatorio: " + f.getFieldKey()
+            );
+        }
+    }
+
+    // Validate types
+    for (Map.Entry<String, Object> entry : values.entrySet()) {
+        String key = entry.getKey();
+        Object v = entry.getValue();
+        TemplateFieldEntity f = fieldMap.get(key);
+        validateType(f, v);
+    }
+
+    // Serialize to JSON and save
+    String valuesJson = objectMapper.writeValueAsString(values);
+
+    ObjectRowEntity row = new ObjectRowEntity();
+    row.setOwnerId(ownerId());
+    row.setTemplateId(templateId);
+    row.setDisplayName(req.getDisplayName().trim());
+    row.setValuesJson(valuesJson);
+
+    ObjectRowEntity saved = rowRepository.save(row);
+
+    // Return response with deserialized values
+    Map<String, Object> map = objectMapper.readValue(
+        saved.getValuesJson(), 
+        Map.class
+    );
+    return new RowResponse(
+        saved.getId(), 
+        saved.getDisplayName(), 
+        map, 
+        saved.getCreatedAt(), 
+        saved.getUpdatedAt()
+    );
+}
+```
+
+<Note>
+See `RowService.java:39` for the complete row creation logic.
+</Note>
+
+### Example Row Data
+
+For a car template with fields `marca`, `modelo`, `año`, `precio`, `combustible`:
+
+```json
+{
+  "displayName": "Toyota Corolla 2020",
+  "values": {
+    "marca": "Toyota",
+    "modelo": "Corolla",
+    "año": 2020,
+    "precio": 15000,
+    "combustible": "Gasolina"
+  }
+}
+```
+
+Stored in database:
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "owner_id": "user_2k3j4h5k6l7m8n9p",
+  "template_id": "660e8400-e29b-41d4-a716-446655440001",
+  "display_name": "Toyota Corolla 2020",
+  "values_json": "{\"marca\":\"Toyota\",\"modelo\":\"Corolla\",\"año\":2020,\"precio\":15000,\"combustible\":\"Gasolina\"}",
+  "created_at": "2024-03-15T10:30:00.000Z",
+  "updated_at": "2024-03-15T10:30:00.000Z"
+}
+```
+
+## Updating Rows (PATCH)
+
+Rows support partial updates using PATCH semantics - you only need to send the fields you want to change:
+
+```java
+public RowResponse patch(UUID templateId, UUID rowId, PatchRowRequest req) {
+    // Verify template and row exist
+    templateRepository.findByIdAndOwnerId(templateId, ownerId())
+            .orElseThrow(() -> new ConflictException(
+                "Template no encontrado o no pertenece al usuario"
+            ));
+
+    ObjectRowEntity row = rowRepository
+            .findByIdAndOwnerIdAndTemplateId(rowId, ownerId(), templateId)
+            .orElseThrow(() -> new ConflictException("Row no encontrada"));
+
+    // Load current values
+    Map<String, Object> current = objectMapper.readValue(
+        row.getValuesJson(), 
+        Map.class
+    );
+
+    // Apply partial update
+    Map<String, Object> patchValues = req.getValues();
+    if (patchValues != null) {
+        // Validate unknown keys
+        for (String key : patchValues.keySet()) {
+            if (!fieldMap.containsKey(key)) {
+                throw new ConflictException(
+                    "Campo no permitido en values: " + key
+                );
+            }
+        }
+        
+        // Validate types for patched fields
+        for (Map.Entry<String, Object> entry : patchValues.entrySet()) {
+            TemplateFieldEntity f = fieldMap.get(entry.getKey());
+            validateType(f, entry.getValue());
+        }
+
+        // Merge patch into current values
+        current.putAll(patchValues);
+    }
+
+    // Validate all required fields after merge
+    for (TemplateFieldEntity f : fields) {
+        if (f.isRequired()) {
+            if (!current.containsKey(f.getFieldKey()) || 
+                current.get(f.getFieldKey()) == null) {
+                throw new ConflictException(
+                    "Falta campo obligatorio: " + f.getFieldKey()
+                );
+            }
+        }
+    }
+
+    // Update display name if provided
+    if (req.getDisplayName() != null) {
+        String dn = req.getDisplayName().trim();
+        if (dn.isEmpty()) 
+            throw new ConflictException(
+                "displayName no puede quedar vacío"
+            );
+        row.setDisplayName(dn);
+    }
+
+    // Save updated values
+    row.setValuesJson(objectMapper.writeValueAsString(current));
+    ObjectRowEntity saved = rowRepository.save(row);
+
+    Map<String, Object> out = objectMapper.readValue(
+        saved.getValuesJson(), 
+        Map.class
+    );
+    return new RowResponse(
+        saved.getId(), 
+        saved.getDisplayName(), 
+        out, 
+        saved.getCreatedAt(), 
+        saved.getUpdatedAt()
+    );
+}
+```
+
+<Note>
+See `RowService.java:130` for the complete PATCH implementation.
+</Note>
+
+### PATCH Example
+
+Update only the price and combustible fields:
+
+```bash
+PATCH /api/v1/templates/{templateId}/rows/{rowId}
+Content-Type: application/json
+
+{
+  "values": {
+    "precio": 14500,
+    "combustible": "Híbrido"
+  }
+}
+```
+
+The other fields (`marca`, `modelo`, `año`) remain unchanged.
+
+## Listing Rows
+
+Rows are retrieved in reverse chronological order (newest first):
+
+```java
+public List<RowResponse> list(UUID templateId) {
+    templateRepository.findByIdAndOwnerId(templateId, ownerId())
+            .orElseThrow(() -> new ConflictException(
+                "Template no encontrado o no pertenece al usuario"
+            ));
+
+    return rowRepository
+            .findByOwnerIdAndTemplateIdOrderByCreatedAtDesc(ownerId(), templateId)
+            .stream()
+            .map(r -> {
+                Map<String, Object> map;
+                try { 
+                    map = objectMapper.readValue(r.getValuesJson(), Map.class); 
+                } catch (Exception e) { 
+                    map = new HashMap<>(); 
+                }
+                return new RowResponse(
+                    r.getId(), 
+                    r.getDisplayName(), 
+                    map, 
+                    r.getCreatedAt(), 
+                    r.getUpdatedAt()
+                );
+            })
+            .toList();
+}
+```
+
+<Note>
+See `RowService.java:101` for row listing implementation.
+</Note>
+
+## Getting a Single Row
+
+```java
+public RowResponse getOne(UUID templateId, UUID rowId) {
+    templateRepository.findByIdAndOwnerId(templateId, ownerId())
+            .orElseThrow(() -> new ConflictException(
+                "Template no encontrado o no pertenece al usuario"
+            ));
+
+    ObjectRowEntity row = rowRepository
+            .findByIdAndOwnerIdAndTemplateId(rowId, ownerId(), templateId)
+            .orElseThrow(() -> new ConflictException("Row no encontrada"));
+
+    Map<String, Object> map = objectMapper.readValue(
+        row.getValuesJson(), 
+        Map.class
+    );
+
+    return new RowResponse(
+        row.getId(), 
+        row.getDisplayName(), 
+        map, 
+        row.getCreatedAt(), 
+        row.getUpdatedAt()
+    );
+}
+```
+
+<Note>
+See `RowService.java:116` for single row retrieval.
+</Note>
+
+## Deleting Rows
+
+Rows can be deleted with cascading effects on their associated logs:
+
+```java
+public void delete(UUID templateId, UUID rowId) {
+    templateRepository.findByIdAndOwnerId(templateId, ownerId())
+            .orElseThrow(() -> new ConflictException(
+                "Template no encontrado o no pertenece al usuario"
+            ));
+
+    ObjectRowEntity row = rowRepository
+            .findByIdAndOwnerIdAndTemplateId(rowId, ownerId(), templateId)
+            .orElseThrow(() -> new ConflictException("Row no encontrada"));
+
+    rowRepository.delete(row);
+}
+```
+
+<Warning>
+Deleting a row also deletes all associated log entries due to the `ON DELETE CASCADE` constraint.
+</Warning>
+
+<Note>
+See `RowService.java:199` for row deletion logic.
+</Note>
+
+## Display Names
+
+The `display_name` field provides a human-readable identifier for each row:
+
+- Maximum length: 160 characters
+- Required for all rows
+- Can be updated via PATCH
+- Commonly used for quick identification in lists (e.g., "Toyota Corolla 2020", "123 Main St Apartment")
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/templates/{templateId}/rows` | Create a new row |
+| `GET` | `/api/v1/templates/{templateId}/rows` | List all rows for a template |
+| `GET` | `/api/v1/templates/{templateId}/rows/{rowId}` | Get a specific row |
+| `PATCH` | `/api/v1/templates/{templateId}/rows/{rowId}` | Update a row (partial) |
+| `DELETE` | `/api/v1/templates/{templateId}/rows/{rowId}` | Delete a row |
+
+## Common Workflows
+
+<CardGroup cols={2}>
+  <Card title="Bulk Import" icon="file-import">
+    Create multiple rows programmatically by calling the POST endpoint in a loop
+  </Card>
+  <Card title="Progressive Updates" icon="arrows-rotate">
+    Use PATCH to incrementally update rows as you gather more information
+  </Card>
+  <Card title="Data Export" icon="file-export">
+    Retrieve all rows and serialize the values_json for backup or migration
+  </Card>
+  <Card title="History Tracking" icon="clock">
+    Each row maintains created_at and updated_at for audit trails
+  </Card>
+</CardGroup>
+
+## Related Features
+
+<CardGroup cols={3}>
+  <Card title="Templates" icon="folder-tree" href="/features/templates">
+    Templates define the structure for rows
+  </Card>
+  <Card title="Fields" icon="table-columns" href="/features/fields">
+    Fields define the schema for row values
+  </Card>
+  <Card title="Logs" icon="clock-rotate-left" href="/features/logs">
+    Track history and scores for individual rows
+  </Card>
+</CardGroup>

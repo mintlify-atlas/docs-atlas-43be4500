@@ -1,0 +1,473 @@
+---
+title: 'Authentication'
+description: 'Learn how to authenticate with the Bitácora Universal API using JWT tokens'
+icon: 'shield-check'
+---
+
+## Overview
+
+Bitácora Universal uses **JSON Web Tokens (JWT)** for API authentication. After registering or logging in, you receive a token that must be included in the `Authorization` header of all subsequent API requests.
+
+## Authentication Flow
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant API
+    Client->>API: POST /api/v1/auth/register or /login
+    API->>API: Validate credentials
+    API->>API: Generate JWT token
+    API-->>Client: Return token
+    Client->>API: GET /api/v1/templates (with token)
+    API->>API: Verify token
+    API-->>Client: Return protected resource
+```
+
+## Public Endpoints
+
+The following endpoints do **not** require authentication:
+
+- `POST /api/v1/auth/register` - Create a new account
+- `POST /api/v1/auth/login` - Authenticate existing user
+- `GET /api/v1/health` - API health check
+
+All other endpoints require a valid JWT token.
+
+## Register a New Account
+
+Create a new user account to obtain an authentication token.
+
+### Endpoint
+
+```
+POST /api/v1/auth/register
+```
+
+### Request Body
+
+<ParamField body="email" type="string" required>
+  Valid email address for the new account. Must be a properly formatted email.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  Account password. Must be between 6 and 72 characters.
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X POST http://localhost:8080/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "securepassword123"
+  }'
+```
+
+<CodeGroup>
+```javascript JavaScript
+const response = await fetch('http://localhost:8080/api/v1/auth/register', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    email: 'user@example.com',
+    password: 'securepassword123'
+  })
+});
+
+const data = await response.json();
+const token = data.token;
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    'http://localhost:8080/api/v1/auth/register',
+    json={
+        'email': 'user@example.com',
+        'password': 'securepassword123'
+    }
+)
+
+data = response.json()
+token = data['token']
+```
+
+```java Java
+HttpClient client = HttpClient.newHttpClient();
+String json = "{\"email\":\"user@example.com\",\"password\":\"securepassword123\"}";
+
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("http://localhost:8080/api/v1/auth/register"))
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString(json))
+    .build();
+
+HttpResponse<String> response = client.send(request, 
+    HttpResponse.BodyHandlers.ofString());
+```
+</CodeGroup>
+
+### Response
+
+**Status Code:** `201 Created`
+
+<ResponseField name="token" type="string" required>
+  JWT token for authenticating subsequent API requests. This token is valid for 7 days (604,800 seconds).
+</ResponseField>
+
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJiaXRhY29yYS11bml2ZXJzYWwiLCJzdWIiOiI3ZjAwMGFhMS1hYzU3LTQyYzMtYjA0ZS1kZWFkYmVlZjAwMDAiLCJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJpYXQiOjE3MDk3MjQwMDAsImV4cCI6MTcxMDMyODgwMH0.signature"
+}
+```
+
+### Validation Errors
+
+If validation fails, you'll receive a `400 Bad Request` response:
+
+```json
+{
+  "timestamp": "2026-03-06T10:30:00.000+00:00",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "Validation failed",
+  "path": "/api/v1/auth/register"
+}
+```
+
+Common validation errors:
+
+- Email is not a valid email format
+- Password is less than 6 characters
+- Email or password is blank
+- Email already exists in the system
+
+## Login to Existing Account
+
+Authenticate with existing credentials to obtain a new token.
+
+### Endpoint
+
+```
+POST /api/v1/auth/login
+```
+
+### Request Body
+
+<ParamField body="email" type="string" required>
+  Email address of the existing account.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  Account password.
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X POST http://localhost:8080/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "securepassword123"
+  }'
+```
+
+<CodeGroup>
+```javascript JavaScript
+const response = await fetch('http://localhost:8080/api/v1/auth/login', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    email: 'user@example.com',
+    password: 'securepassword123'
+  })
+});
+
+const data = await response.json();
+const token = data.token;
+
+// Store token for subsequent requests
+localStorage.setItem('authToken', token);
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    'http://localhost:8080/api/v1/auth/login',
+    json={
+        'email': 'user@example.com',
+        'password': 'securepassword123'
+    }
+)
+
+if response.status_code == 200:
+    token = response.json()['token']
+    # Store token for subsequent requests
+    session.headers.update({'Authorization': f'Bearer {token}'})
+```
+
+```java Java
+HttpClient client = HttpClient.newHttpClient();
+String json = "{\"email\":\"user@example.com\",\"password\":\"securepassword123\"}";
+
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("http://localhost:8080/api/v1/auth/login"))
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString(json))
+    .build();
+
+HttpResponse<String> response = client.send(request,
+    HttpResponse.BodyHandlers.ofString());
+
+if (response.statusCode() == 200) {
+    // Parse token from response
+    String token = parseToken(response.body());
+}
+```
+</CodeGroup>
+
+### Response
+
+**Status Code:** `200 OK`
+
+<ResponseField name="token" type="string" required>
+  JWT token for authenticating subsequent API requests.
+</ResponseField>
+
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJiaXRhY29yYS11bml2ZXJzYWwiLCJzdWIiOiI3ZjAwMGFhMS1hYzU3LTQyYzMtYjA0ZS1kZWFkYmVlZjAwMDAiLCJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJpYXQiOjE3MDk3MjQwMDAsImV4cCI6MTcxMDMyODgwMH0.signature"
+}
+```
+
+## Using the JWT Token
+
+Once you have obtained a token, include it in the `Authorization` header of all protected API requests.
+
+### Header Format
+
+```
+Authorization: Bearer YOUR_JWT_TOKEN
+```
+
+### Example Authenticated Request
+
+```bash
+curl -X GET http://localhost:8080/api/v1/templates \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJiaXRhY29yYS11bml2ZXJzYWwiLCJzdWIiOiI3ZjAwMGFhMS1hYzU3LTQyYzMtYjA0ZS1kZWFkYmVlZjAwMDAiLCJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJpYXQiOjE3MDk3MjQwMDAsImV4cCI6MTcxMDMyODgwMH0.signature"
+```
+
+<CodeGroup>
+```javascript JavaScript
+const token = localStorage.getItem('authToken');
+
+const response = await fetch('http://localhost:8080/api/v1/templates', {
+  method: 'GET',
+  headers: {
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json'
+  }
+});
+
+const templates = await response.json();
+```
+
+```python Python
+import requests
+
+token = 'YOUR_JWT_TOKEN'
+
+headers = {
+    'Authorization': f'Bearer {token}',
+    'Content-Type': 'application/json'
+}
+
+response = requests.get(
+    'http://localhost:8080/api/v1/templates',
+    headers=headers
+)
+
+templates = response.json()
+```
+
+```java Java
+String token = "YOUR_JWT_TOKEN";
+
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("http://localhost:8080/api/v1/templates"))
+    .header("Authorization", "Bearer " + token)
+    .header("Content-Type", "application/json")
+    .GET()
+    .build();
+
+HttpResponse<String> response = client.send(request,
+    HttpResponse.BodyHandlers.ofString());
+```
+</CodeGroup>
+
+## JWT Token Structure
+
+The JWT token contains encoded information about the authenticated user:
+
+<ResponseField name="iss" type="string">
+  Issuer of the token: `bitacora-universal`
+</ResponseField>
+
+<ResponseField name="sub" type="string">
+  Subject (user ID) as a UUID
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  User's email address
+</ResponseField>
+
+<ResponseField name="iat" type="integer">
+  Issued at timestamp (Unix time)
+</ResponseField>
+
+<ResponseField name="exp" type="integer">
+  Expiration timestamp (Unix time) - 7 days from issuance
+</ResponseField>
+
+### Decoded Token Example
+
+```json
+{
+  "iss": "bitacora-universal",
+  "sub": "7f000aa1-ac57-42c3-b04e-deadbeef0000",
+  "email": "user@example.com",
+  "iat": 1709724000,
+  "exp": 1710328800
+}
+```
+
+## Token Expiration
+
+JWT tokens expire after **7 days** (604,800 seconds). When a token expires:
+
+1. API requests will return `401 Unauthorized`
+2. The client must authenticate again using `/auth/login`
+3. A new token will be issued with a fresh 7-day expiration
+
+<Warning>
+  Always handle token expiration gracefully in your application. Implement token refresh logic to automatically re-authenticate when tokens expire.
+</Warning>
+
+## Security Best Practices
+
+<AccordionGroup>
+  <Accordion title="Store tokens securely">
+    - Never store tokens in localStorage in production web applications (vulnerable to XSS)
+    - Use httpOnly cookies for web applications when possible
+    - For mobile apps, use secure storage like Keychain (iOS) or Keystore (Android)
+    - Never commit tokens to version control or logs
+  </Accordion>
+
+  <Accordion title="Use HTTPS in production">
+    - Always use HTTPS to encrypt tokens in transit
+    - The token contains user identification and should never be transmitted over unencrypted connections
+    - Configure your server with valid SSL/TLS certificates
+  </Accordion>
+
+  <Accordion title="Implement token rotation">
+    - Re-authenticate periodically rather than reusing the same token indefinitely
+    - Consider implementing shorter token lifespans with refresh token mechanisms for high-security applications
+    - Clear tokens on logout
+  </Accordion>
+
+  <Accordion title="Validate on the client side">
+    - Check token expiration before making API requests
+    - Decode the JWT (without verification) to read the `exp` claim
+    - Proactively refresh tokens before they expire
+  </Accordion>
+</AccordionGroup>
+
+## Authentication Errors
+
+### 401 Unauthorized
+
+Returned when:
+- No `Authorization` header is provided
+- Token format is invalid (not "Bearer TOKEN")
+- Token signature is invalid
+- Token has expired
+- Token issuer doesn't match expected value
+
+```json
+{
+  "timestamp": "2026-03-06T10:30:00.000+00:00",
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Authentication required",
+  "path": "/api/v1/templates"
+}
+```
+
+### 403 Forbidden
+
+Returned when:
+- Token is valid but user lacks permission for the resource
+- User account has been disabled or deleted
+
+```json
+{
+  "timestamp": "2026-03-06T10:30:00.000+00:00",
+  "status": 403,
+  "error": "Forbidden",
+  "message": "Access denied",
+  "path": "/api/v1/templates/123"
+}
+```
+
+## Testing Authentication
+
+You can test the authentication flow using the following steps:
+
+1. **Register a test account:**
+
+```bash
+curl -X POST http://localhost:8080/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "test@example.com",
+    "password": "testpass123"
+  }'
+```
+
+2. **Save the token from the response:**
+
+```bash
+TOKEN="eyJhbGciOiJIUzI1NiJ9..."
+```
+
+3. **Make an authenticated request:**
+
+```bash
+curl -X GET http://localhost:8080/api/v1/templates \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Templates API" icon="table" href="/api/templates">
+    Create and manage templates
+  </Card>
+  <Card title="Logs API" icon="list" href="/api/logs">
+    Work with log entries
+  </Card>
+  <Card title="Fields API" icon="input-text" href="/api/fields">
+    Configure custom fields
+  </Card>
+  <Card title="API Overview" icon="book" href="/api/overview">
+    Return to API overview
+  </Card>
+</CardGroup>

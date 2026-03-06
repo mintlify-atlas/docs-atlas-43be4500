@@ -1,0 +1,530 @@
+---
+title: 'Scoring System Guide'
+description: 'Track quality metrics and add detailed comments to your data rows'
+---
+
+The scoring system allows you to track quality metrics, reviews, or ratings for individual rows. Each row can have multiple log entries with scores (0-10) and detailed comments.
+
+## Overview
+
+Log entries provide:
+- **Numeric Scoring:** Decimal scores from 0.00 to 10.00
+- **Detailed Comments:** Text notes up to 5000 characters
+- **Event Dating:** Optional event dates separate from creation timestamp
+- **Audit Trail:** Automatic creation timestamps for tracking history
+
+<Note>
+Log entries belong to rows, not templates. Each row can have unlimited log entries to track changes over time.
+</Note>
+
+## Use Cases
+
+<CardGroup cols={2}>
+
+<Card title="Quality Tracking" icon="chart-line">
+  Track product quality scores over time with inspection notes
+</Card>
+
+<Card title="Performance Reviews" icon="star">
+  Record employee performance ratings with detailed feedback
+</Card>
+
+<Card title="Customer Satisfaction" icon="face-smile">
+  Log customer reviews and satisfaction scores
+</Card>
+
+<Card title="Progress Monitoring" icon="tasks">
+  Track project milestones with progress scores and updates
+</Card>
+
+</CardGroup>
+
+## Creating Log Entries
+
+<Steps>
+
+### Ensure Row Exists
+
+Log entries are attached to rows. First, create a row in your template.
+
+**Example Row:**
+
+```json
+{
+  "id": "f1a2b3c4-d5e6-7890-abcd-ef1234567890",
+  "displayName": "Toyota Corolla 2020",
+  "values": {
+    "marca": "Toyota",
+    "kilometros": 45000
+  }
+}
+```
+
+### Add a Log Entry
+
+Create a log entry with a score and comment.
+
+**Endpoint:** `POST /api/v1/rows/{rowId}/logs`
+
+**Basic Request:**
+
+```json
+{
+  "score": 8.5,
+  "comment": "Excellent condition. Engine runs smoothly, no visible damage."
+}
+```
+
+**Request with Event Date:**
+
+```json
+{
+  "score": 7.0,
+  "comment": "Good overall, minor scratches on rear bumper. Brakes need attention.",
+  "eventDate": "2026-03-05"
+}
+```
+
+**Field Requirements:**
+- `score`: Required, decimal 0.00-10.00, up to 2 decimal places
+- `comment`: Required, non-blank, max 5000 characters
+- `eventDate`: Optional, format YYYY-MM-DD
+
+**Response (201 Created):**
+
+```json
+{
+  "id": "b1c2d3e4-f5a6-7890-bcde-f12345678901",
+  "score": 8.5,
+  "comment": "Excellent condition. Engine runs smoothly, no visible damage.",
+  "eventDate": null,
+  "createdAt": "2026-03-06T14:30:00.123Z"
+}
+```
+
+**With Event Date:**
+
+```json
+{
+  "id": "c2d3e4f5-a6b7-8901-cdef-123456789012",
+  "score": 7.0,
+  "comment": "Good overall, minor scratches on rear bumper. Brakes need attention.",
+  "eventDate": "2026-03-05",
+  "createdAt": "2026-03-06T14:35:00.456Z"
+}
+```
+
+**Implementation Reference:** `LogService.java:29`
+
+```java
+public LogResponse create(UUID rowId, CreateLogRequest req) {
+    // Verify row exists and belongs to user
+    boolean exists = rowRepository.existsById(rowId);
+    if (!exists) throw new ConflictException("Row no encontrada");
+    
+    // Parse optional event date
+    LocalDate eventDate = null;
+    if (req.getEventDate() != null && !req.getEventDate().isBlank()) {
+        try { 
+            eventDate = LocalDate.parse(req.getEventDate().trim()); 
+        } catch (Exception e) { 
+            throw new ConflictException("eventDate inválida (YYYY-MM-DD)"); 
+        }
+    }
+    
+    // Create log entry
+    LogEntryEntity e = new LogEntryEntity();
+    e.setOwnerId(ownerId());
+    e.setRowId(rowId);
+    e.setScore(req.getScore());
+    e.setComment(req.getComment().trim());
+    e.setEventDate(eventDate);
+    
+    LogEntryEntity saved = logRepository.save(e);
+    return new LogResponse(...);
+}
+```
+
+### Retrieve All Log Entries for a Row
+
+Get the complete history of log entries, ordered by creation date (newest first).
+
+**Endpoint:** `GET /api/v1/rows/{rowId}/logs`
+
+**Response:**
+
+```json
+[
+  {
+    "id": "c2d3e4f5-a6b7-8901-cdef-123456789012",
+    "score": 7.0,
+    "comment": "Good overall, minor scratches on rear bumper. Brakes need attention.",
+    "eventDate": "2026-03-05",
+    "createdAt": "2026-03-06T14:35:00.456Z"
+  },
+  {
+    "id": "b1c2d3e4-f5a6-7890-bcde-f12345678901",
+    "score": 8.5,
+    "comment": "Excellent condition. Engine runs smoothly, no visible damage.",
+    "eventDate": null,
+    "createdAt": "2026-03-06T14:30:00.123Z"
+  }
+]
+```
+
+</Steps>
+
+## Score Validation
+
+### Valid Scores
+
+Scores must be between 0.00 and 10.00 with up to 2 decimal places.
+
+**Valid Examples:**
+
+```json
+{"score": 0.00}    // Minimum
+{"score": 5}       // Integer
+{"score": 7.5}     // One decimal
+{"score": 8.75}    // Two decimals
+{"score": 10.00}   // Maximum
+```
+
+### Invalid Scores
+
+**Below Minimum:**
+
+```json
+{"score": -1.0}
+```
+
+**Error:** `400 Bad Request` - Validation error: must be >= 0.00
+
+**Above Maximum:**
+
+```json
+{"score": 10.5}
+```
+
+**Error:** `400 Bad Request` - Validation error: must be less than or equal to 10.00
+
+**Database Constraint:** `V1__init.sql:61`
+
+```sql
+CONSTRAINT ck_log_score_range
+    CHECK (score >= 0.00 AND score <= 10.00)
+```
+
+### Request DTO Validation
+
+**Reference:** `CreateLogRequest.java:8`
+
+```java
+public class CreateLogRequest {
+    @NotNull
+    @DecimalMin(value = "0.00")
+    @DecimalMax(value = "10.00")
+    private BigDecimal score;
+    
+    @NotBlank
+    @Size(max = 5000)
+    private String comment;
+    
+    // Optional, format "YYYY-MM-DD"
+    private String eventDate;
+}
+```
+
+## Event Date vs Created At
+
+Understand the difference between `eventDate` and `createdAt`:
+
+<CardGroup cols={2}>
+
+<Card title="eventDate" icon="calendar-day">
+  **Optional** - When the rated event occurred  
+  **Format:** YYYY-MM-DD  
+  **Use:** Backdating reviews or tracking historical events  
+  **Example:** "2026-03-05"
+</Card>
+
+<Card title="createdAt" icon="clock">
+  **Automatic** - When the log entry was created  
+  **Format:** ISO 8601 timestamp  
+  **Use:** Audit trail of when reviews were submitted  
+  **Example:** "2026-03-06T14:30:00.123Z"
+</Card>
+
+</CardGroup>
+
+### Use Case Example
+
+**Scenario:** Recording a car inspection that happened yesterday
+
+```json
+{
+  "score": 9.0,
+  "comment": "Inspected yesterday. Perfect mechanical condition.",
+  "eventDate": "2026-03-05"  // When inspection happened
+}
+```
+
+**Response:**
+
+```json
+{
+  "id": "...",
+  "score": 9.0,
+  "comment": "Inspected yesterday. Perfect mechanical condition.",
+  "eventDate": "2026-03-05",      // When it happened
+  "createdAt": "2026-03-06T10:00:00.000Z"  // When you logged it
+}
+```
+
+## Database Schema
+
+### Log Entry Table
+
+**Reference:** `V1__init.sql:48`
+
+```sql
+CREATE TABLE log_entry (
+    id            BINARY(16) NOT NULL,
+    owner_id      VARCHAR(64) NOT NULL,
+    row_id        BINARY(16) NOT NULL,
+    score         DECIMAL(4,2) NOT NULL,
+    comment       TEXT NOT NULL,
+    event_date    DATE NULL,
+    created_at    TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (id),
+    CONSTRAINT fk_log_row
+        FOREIGN KEY (row_id) REFERENCES object_row(id)
+            ON DELETE CASCADE,
+    KEY ix_log_owner_row_created (owner_id, row_id, created_at),
+    CONSTRAINT ck_log_score_range
+        CHECK (score >= 0.00 AND score <= 10.00)
+);
+```
+
+### Key Features
+
+**Cascade Delete:**
+When a row is deleted, all its log entries are automatically deleted.
+
+```sql
+CONSTRAINT fk_log_row
+    FOREIGN KEY (row_id) REFERENCES object_row(id)
+        ON DELETE CASCADE
+```
+
+**Indexed Queries:**
+Fast retrieval of logs by owner and row:
+
+```sql
+KEY ix_log_owner_row_created (owner_id, row_id, created_at)
+```
+
+**Score Constraint:**
+Database-level validation:
+
+```sql
+CONSTRAINT ck_log_score_range
+    CHECK (score >= 0.00 AND score <= 10.00)
+```
+
+## Complete Example: Vehicle Inspection Log
+
+```bash
+ROW_ID="f1a2b3c4-d5e6-7890-abcd-ef1234567890"
+TOKEN="your_jwt_token"
+
+# Initial inspection
+curl -X POST "http://localhost:8080/api/v1/rows/$ROW_ID/logs" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "score": 9.0,
+    "comment": "Initial inspection: Excellent condition. Clean interior, no mechanical issues.",
+    "eventDate": "2026-03-01"
+  }'
+
+# 30-day check
+curl -X POST "http://localhost:8080/api/v1/rows/$ROW_ID/logs" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "score": 8.5,
+    "comment": "30-day check: Minor wear on driver seat, small chip in windshield. Still running great.",
+    "eventDate": "2026-03-31"
+  }'
+
+# 60-day check
+curl -X POST "http://localhost:8080/api/v1/rows/$ROW_ID/logs" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "score": 7.5,
+    "comment": "60-day check: Needs brake pad replacement soon. Oil change completed. Tire pressure adjusted.",
+    "eventDate": "2026-04-30"
+  }'
+
+# Retrieve full log history
+curl -X GET "http://localhost:8080/api/v1/rows/$ROW_ID/logs" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**Response:**
+
+```json
+[
+  {
+    "id": "...",
+    "score": 7.5,
+    "comment": "60-day check: Needs brake pad replacement soon. Oil change completed. Tire pressure adjusted.",
+    "eventDate": "2026-04-30",
+    "createdAt": "2026-05-01T09:00:00.000Z"
+  },
+  {
+    "id": "...",
+    "score": 8.5,
+    "comment": "30-day check: Minor wear on driver seat, small chip in windshield. Still running great.",
+    "eventDate": "2026-03-31",
+    "createdAt": "2026-04-01T09:00:00.000Z"
+  },
+  {
+    "id": "...",
+    "score": 9.0,
+    "comment": "Initial inspection: Excellent condition. Clean interior, no mechanical issues.",
+    "eventDate": "2026-03-01",
+    "createdAt": "2026-03-02T09:00:00.000Z"
+  }
+]
+```
+
+## Real-World Scenarios
+
+### Quality Control Workflow
+
+**Template:** Product Inspections
+
+```bash
+# Day 1: Initial quality check
+curl -X POST "http://localhost:8080/api/v1/rows/$PRODUCT_ID/logs" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "score": 10.0,
+    "comment": "Perfect. All specifications met. Zero defects found.",
+    "eventDate": "2026-03-01"
+  }'
+
+# Day 15: Mid-production check
+curl -X POST "http://localhost:8080/api/v1/rows/$PRODUCT_ID/logs" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "score": 8.0,
+    "comment": "Good quality maintained. Minor color variation in batch 5. Within acceptable range.",
+    "eventDate": "2026-03-15"
+  }'
+```
+
+### Customer Satisfaction Tracking
+
+**Template:** Customer Orders
+
+```bash
+# Customer review
+curl -X POST "http://localhost:8080/api/v1/rows/$ORDER_ID/logs" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "score": 9.5,
+    "comment": "Customer feedback: Very satisfied with product quality. Delivery was 1 day late but communication was excellent.",
+    "eventDate": "2026-03-10"
+  }'
+```
+
+### Employee Performance Reviews
+
+**Template:** Employee Records
+
+```bash
+# Quarterly review
+curl -X POST "http://localhost:8080/api/v1/rows/$EMPLOYEE_ID/logs" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "score": 8.5,
+    "comment": "Q1 2026 Review: Exceeded sales targets by 15%. Strong team collaboration. Areas for improvement: time management and documentation.",
+    "eventDate": "2026-03-31"
+  }'
+```
+
+## Error Handling
+
+<CardGroup cols={2}>
+
+<Card title="Row Not Found" icon="magnifying-glass">
+  **Status:** 409 Conflict  
+  **Message:** "Row no encontrada"  
+  **Cause:** Invalid row ID or row doesn't belong to user
+</Card>
+
+<Card title="Invalid Event Date" icon="calendar-xmark">
+  **Status:** 409 Conflict  
+  **Message:** "eventDate inválida (YYYY-MM-DD)"  
+  **Cause:** Date not in YYYY-MM-DD format
+</Card>
+
+<Card title="Score Out of Range" icon="calculator">
+  **Status:** 400 Bad Request  
+  **Cause:** Score < 0.00 or > 10.00
+</Card>
+
+<Card title="Empty Comment" icon="comment-slash">
+  **Status:** 400 Bad Request  
+  **Cause:** Comment is blank or whitespace only
+</Card>
+
+</CardGroup>
+
+## Best Practices
+
+<Tip>
+**Use Decimal Precision:** Scores support 2 decimal places. Use `8.75` instead of `9` for more granular ratings.
+</Tip>
+
+<Tip>
+**Meaningful Comments:** Provide detailed, actionable feedback in comments rather than generic statements.
+</Tip>
+
+<Tip>
+**Consistent Event Dates:** When backdating entries, always specify `eventDate` to maintain accurate historical records.
+</Tip>
+
+<Warning>
+Log entries cannot be edited or deleted. Create a new entry if you need to update information.
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+
+<Card title="Managing Data" icon="database" href="/guides/managing-data">
+  Learn more about creating and updating rows
+</Card>
+
+<Card title="Log API Reference" icon="code" href="/api/logs">
+  Complete log entry API documentation
+</Card>
+
+<Card title="Creating Templates" icon="table" href="/guides/creating-templates">
+  Set up templates for scoring workflows
+</Card>
+
+<Card title="Authentication" icon="shield" href="/guides/authentication">
+  Understand authentication requirements
+</Card>
+
+</CardGroup>

@@ -1,0 +1,170 @@
+---
+title: 'API Overview'
+description: 'Introduction to the Bitácora Universal REST API'
+icon: 'code'
+---
+
+## Introduction
+
+The Bitácora Universal API is a RESTful API that enables you to programmatically manage templates, logs, and custom fields. This API allows you to integrate Bitácora Universal into your existing workflows and applications.
+
+## Base URL
+
+All API requests should be made to:
+
+```
+http://localhost:8080/api/v1
+```
+
+<Note>
+  In production environments, replace `localhost:8080` with your deployed server URL.
+</Note>
+
+## API Versioning
+
+The Bitácora Universal API uses URL-based versioning. The current version is `v1`, which is included in all endpoint paths:
+
+```
+/api/v1/{resource}
+```
+
+This versioning strategy ensures backward compatibility and allows for future API evolution without breaking existing integrations.
+
+## Request Format
+
+All API requests must:
+
+- Use HTTPS in production environments
+- Include appropriate HTTP methods (GET, POST, PUT, DELETE)
+- Send JSON payloads with `Content-Type: application/json` header
+- Include authentication headers for protected endpoints
+
+### Standard Headers
+
+```http
+Content-Type: application/json
+Authorization: Bearer YOUR_JWT_TOKEN
+```
+
+## Response Format
+
+All API responses return JSON-formatted data. Successful responses include the requested data, while error responses follow a consistent structure.
+
+### Success Response
+
+```json
+{
+  "id": "123e4567-e89b-12d3-a456-426614174000",
+  "name": "Production Template",
+  "createdAt": "2026-03-06T10:30:00Z"
+}
+```
+
+### Error Response
+
+```json
+{
+  "timestamp": "2026-03-06T10:30:00.000+00:00",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "Validation failed",
+  "path": "/api/v1/templates"
+}
+```
+
+## HTTP Status Codes
+
+The API uses standard HTTP status codes to indicate success or failure:
+
+<ResponseField name="200 OK" type="success">
+  Request succeeded. Response body contains the requested data.
+</ResponseField>
+
+<ResponseField name="201 Created" type="success">
+  Resource was successfully created. Response includes the new resource.
+</ResponseField>
+
+<ResponseField name="204 No Content" type="success">
+  Request succeeded with no response body (typically for DELETE operations).
+</ResponseField>
+
+<ResponseField name="400 Bad Request" type="error">
+  Invalid request format or validation error. Check request parameters.
+</ResponseField>
+
+<ResponseField name="401 Unauthorized" type="error">
+  Missing or invalid authentication token. See [Authentication](/api/authentication).
+</ResponseField>
+
+<ResponseField name="403 Forbidden" type="error">
+  Authenticated but lacking permission to access the resource.
+</ResponseField>
+
+<ResponseField name="404 Not Found" type="error">
+  Requested resource does not exist.
+</ResponseField>
+
+<ResponseField name="500 Internal Server Error" type="error">
+  Server error. Contact support if the issue persists.
+</ResponseField>
+
+## Rate Limiting
+
+<Info>
+  Currently, the Bitácora Universal API does not enforce rate limits. However, we recommend implementing reasonable request throttling in your applications to ensure optimal performance.
+</Info>
+
+## CORS Policy
+
+The API handles CORS (Cross-Origin Resource Sharing) for web applications. OPTIONS requests are automatically processed and do not require authentication.
+
+## Pagination
+
+For endpoints that return lists of resources, pagination parameters can be used:
+
+<ParamField query="page" type="integer" default="0">
+  Page number (zero-indexed)
+</ParamField>
+
+<ParamField query="size" type="integer" default="20">
+  Number of items per page
+</ParamField>
+
+<ParamField query="sort" type="string">
+  Sort field and direction (e.g., `createdAt,desc`)
+</ParamField>
+
+## Health Check
+
+Monitor API availability using the health check endpoint:
+
+```bash
+curl http://localhost:8080/api/v1/health
+```
+
+**Response:**
+
+```
+ok
+```
+
+<Note>
+  The health check endpoint does not require authentication and is useful for monitoring and load balancer health checks.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="lock" href="/api/authentication">
+    Learn how to authenticate API requests using JWT tokens
+  </Card>
+  <Card title="Templates" icon="table" href="/api/templates">
+    Manage templates and their structure
+  </Card>
+  <Card title="Logs" icon="list" href="/api/logs">
+    Create and query log entries
+  </Card>
+  <Card title="Fields" icon="input-text" href="/api/fields">
+    Configure custom fields for templates
+  </Card>
+</CardGroup>

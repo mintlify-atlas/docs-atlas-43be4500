@@ -1,0 +1,531 @@
+---
+title: 'Managing Data Guide'
+description: 'Complete guide to creating, reading, updating, and deleting rows in your templates'
+---
+
+Once you've created a template with fields, you can start adding rows (data records) to it. This guide covers the complete CRUD workflow.
+
+## Overview
+
+Rows in Bitácora Universal are JSON-based records that conform to your template's field definitions. Each row:
+- Must provide all required fields
+- Must match field data types exactly
+- Stores values in a flexible `values_json` column
+- Has a human-readable `display_name` for easy identification
+
+<Note>
+Rows cannot be created until the template has at least one field defined. You'll get a `409 Conflict` error if you try.
+</Note>
+
+## Creating Rows
+
+<Steps>
+
+### Define Your Template
+
+First, ensure you have a template with fields. For this example, we'll use a "Coches Usados" template with these fields:
+
+```json
+[
+  {"fieldKey": "marca", "dataType": "TEXT", "required": true},
+  {"fieldKey": "combustible", "dataType": "SELECT", "required": true, 
+   "optionsJson": "[\"Gasolina\",\"Diesel\",\"Eléctrico\"]"},
+  {"fieldKey": "kilometros", "dataType": "NUMBER", "required": false},
+  {"fieldKey": "fecha_compra", "dataType": "DATE", "required": false},
+  {"fieldKey": "vendido", "dataType": "BOOLEAN", "required": false}
+]
+```
+
+### Create a Row
+
+Add a new row to your template with data that matches your field definitions.
+
+**Endpoint:** `POST /api/v1/templates/{templateId}/rows`
+
+**Request:**
+
+```json
+{
+  "displayName": "Toyota Corolla 2020",
+  "values": {
+    "marca": "Toyota",
+    "combustible": "Gasolina",
+    "kilometros": 45000,
+    "fecha_compra": "2023-05-15",
+    "vendido": false
+  }
+}
+```
+
+**Field Requirements:**
+- `displayName`: Required, max 160 characters - human-readable identifier
+- `values`: Required, object with field keys and values
+  - Must include all required fields
+  - Cannot include unknown field keys
+  - Values must match field data types
+
+**Response (201 Created):**
+
+```json
+{
+  "id": "f1a2b3c4-d5e6-7890-abcd-ef1234567890",
+  "displayName": "Toyota Corolla 2020",
+  "values": {
+    "marca": "Toyota",
+    "combustible": "Gasolina",
+    "kilometros": 45000,
+    "fecha_compra": "2023-05-15",
+    "vendido": false
+  },
+  "createdAt": "2026-03-06T11:00:00.123Z",
+  "updatedAt": "2026-03-06T11:00:00.123Z"
+}
+```
+
+**Implementation Reference:** `RowService.java:39`
+
+```java
+public RowResponse create(UUID templateId, CreateRowRequest req) {
+    templateRepository.findByIdAndOwnerId(templateId, ownerId())
+            .orElseThrow(() -> new ConflictException("Template no encontrado o no pertenece al usuario"));
+    
+    List<TemplateFieldEntity> fields = fieldRepository.findByTemplateIdOrderByOrderIndexAsc(templateId);
+    if (fields.isEmpty()) {
+        throw new ConflictException("No puedes crear filas: el template no tiene columnas definidas");
+    }
+    
+    // Validation and creation logic...
+}
+```
+
+### Validation Rules
+
+The system validates your data before saving:
+
+**1. Unknown Fields**
+
+```json
+{
+  "displayName": "Test Car",
+  "values": {
+    "marca": "Ford",
+    "color": "Red"  // ❌ Field 'color' not defined in template
+  }
+}
+```
+
+**Error:** `409 Conflict` - "Campo no permitido en values: color"
+
+**2. Missing Required Fields**
+
+```json
+{
+  "displayName": "Test Car",
+  "values": {
+    "kilometros": 50000
+    // ❌ Missing required fields: 'marca' and 'combustible'
+  }
+}
+```
+
+**Error:** `409 Conflict` - "Falta campo obligatorio: marca"
+
+**3. Type Mismatches**
+
+```json
+{
+  "displayName": "Test Car",
+  "values": {
+    "marca": "BMW",
+    "combustible": "Gasolina",
+    "kilometros": "fifty thousand"  // ❌ Should be NUMBER
+  }
+}
+```
+
+**Error:** `409 Conflict` - "Campo kilometros debe ser NUMBER"
+
+**4. Invalid SELECT Values**
+
+```json
+{
+  "displayName": "Test Car",
+  "values": {
+    "marca": "BMW",
+    "combustible": "Gas Natural"  // ❌ Not in allowed options
+  }
+}
+```
+
+**Error:** `409 Conflict` - "Valor no permitido para combustible"
+
+**Validation Reference:** `RowService.java:209`
+
+```java
+private void validateType(TemplateFieldEntity field, Object value) {
+    String type = field.getDataType();
+    if (value == null) {
+        if (field.isRequired()) 
+            throw new ConflictException("Campo obligatorio no puede ser null: " + field.getFieldKey());
+        return;
+    }
+    
+    switch (FieldType.valueOf(type)) {
+        case TEXT -> {
+            if (!(value instanceof String)) 
+                throw new ConflictException("Campo " + field.getFieldKey() + " debe ser TEXT");
+        }
+        case NUMBER -> {
+            if (!(value instanceof Number)) 
+                throw new ConflictException("Campo " + field.getFieldKey() + " debe ser NUMBER");
+            new BigDecimal(value.toString());
+        }
+        // ... other types
+    }
+}
+```
+
+</Steps>
+
+## Reading Rows
+
+### List All Rows in a Template
+
+Retrieve all rows for a specific template, ordered by creation date (newest first).
+
+**Endpoint:** `GET /api/v1/templates/{templateId}/rows`
+
+**Response:**
+
+```json
+[
+  {
+    "id": "f1a2b3c4-d5e6-7890-abcd-ef1234567890",
+    "displayName": "Toyota Corolla 2020",
+    "values": {
+      "marca": "Toyota",
+      "combustible": "Gasolina",
+      "kilometros": 45000,
+      "fecha_compra": "2023-05-15",
+      "vendido": false
+    },
+    "createdAt": "2026-03-06T11:00:00.123Z",
+    "updatedAt": "2026-03-06T11:00:00.123Z"
+  },
+  {
+    "id": "a2b3c4d5-e6f7-8901-bcde-f12345678901",
+    "displayName": "Honda Civic 2019",
+    "values": {
+      "marca": "Honda",
+      "combustible": "Diesel",
+      "kilometros": 60000,
+      "fecha_compra": "2022-11-20",
+      "vendido": true
+    },
+    "createdAt": "2026-03-06T10:45:00.123Z",
+    "updatedAt": "2026-03-06T12:30:00.456Z"
+  }
+]
+```
+
+### Get a Single Row
+
+Retrieve a specific row by its ID.
+
+**Endpoint:** `GET /api/v1/templates/{templateId}/rows/{rowId}`
+
+**Response:**
+
+```json
+{
+  "id": "f1a2b3c4-d5e6-7890-abcd-ef1234567890",
+  "displayName": "Toyota Corolla 2020",
+  "values": {
+    "marca": "Toyota",
+    "combustible": "Gasolina",
+    "kilometros": 45000,
+    "fecha_compra": "2023-05-15",
+    "vendido": false
+  },
+  "createdAt": "2026-03-06T11:00:00.123Z",
+  "updatedAt": "2026-03-06T11:00:00.123Z"
+}
+```
+
+## Updating Rows
+
+### Partial Update (PATCH)
+
+Update specific fields without sending the entire row.
+
+**Endpoint:** `PATCH /api/v1/templates/{templateId}/rows/{rowId}`
+
+**Update Only Values:**
+
+```json
+{
+  "values": {
+    "kilometros": 47500,
+    "vendido": true
+  }
+}
+```
+
+**Update Display Name:**
+
+```json
+{
+  "displayName": "Toyota Corolla 2020 - VENDIDO"
+}
+```
+
+**Update Both:**
+
+```json
+{
+  "displayName": "Toyota Corolla 2020 - VENDIDO",
+  "values": {
+    "vendido": true
+  }
+}
+```
+
+**Response:**
+
+```json
+{
+  "id": "f1a2b3c4-d5e6-7890-abcd-ef1234567890",
+  "displayName": "Toyota Corolla 2020 - VENDIDO",
+  "values": {
+    "marca": "Toyota",
+    "combustible": "Gasolina",
+    "kilometros": 47500,
+    "fecha_compra": "2023-05-15",
+    "vendido": true
+  },
+  "createdAt": "2026-03-06T11:00:00.123Z",
+  "updatedAt": "2026-03-06T14:15:00.789Z"
+}
+```
+
+<Tip>
+PATCH merges your changes with existing data. You only need to send the fields you want to update.
+</Tip>
+
+**Implementation Reference:** `RowService.java:130`
+
+```java
+public RowResponse patch(UUID templateId, UUID rowId, PatchRowRequest req) {
+    // ... find row and fields ...
+    
+    // Load current values
+    Map<String, Object> current;
+    try { 
+        current = objectMapper.readValue(row.getValuesJson(), Map.class); 
+    } catch (Exception e) { 
+        current = new HashMap<>(); 
+    }
+    
+    // Merge patch values
+    Map<String, Object> patchValues = req.getValues();
+    if (patchValues != null) {
+        // Validate unknown keys and types
+        // ...
+        
+        // Apply merge
+        current.putAll(patchValues);
+    }
+    
+    // Validate required fields after merge
+    // ...
+}
+```
+
+### Setting Values to Null
+
+You can set optional fields to `null`:
+
+```json
+{
+  "values": {
+    "fecha_compra": null
+  }
+}
+```
+
+<Warning>
+You cannot set required fields to `null`. This will return `409 Conflict`: "Falta campo obligatorio: {fieldKey}"
+</Warning>
+
+## Deleting Rows
+
+### Delete a Row
+
+Permanently delete a row and all associated log entries.
+
+**Endpoint:** `DELETE /api/v1/templates/{templateId}/rows/{rowId}`
+
+**Response:** `204 No Content`
+
+<Warning>
+Deleting a row cascades to all log entries associated with it. This action cannot be undone.
+</Warning>
+
+**Implementation:**
+
+```java
+public void delete(UUID templateId, UUID rowId) {
+    templateRepository.findByIdAndOwnerId(templateId, ownerId())
+            .orElseThrow(() -> new ConflictException("Template no encontrado o no pertenece al usuario"));
+    
+    ObjectRowEntity row = rowRepository.findByIdAndOwnerIdAndTemplateId(rowId, ownerId(), templateId)
+            .orElseThrow(() -> new ConflictException("Row no encontrada"));
+    
+    rowRepository.delete(row);
+}
+```
+
+## Database Storage
+
+### Object Row Table
+
+**Reference:** `V1__init.sql:33`
+
+```sql
+CREATE TABLE object_row (
+    id            BINARY(16) NOT NULL,
+    owner_id      VARCHAR(64) NOT NULL,
+    template_id   BINARY(16) NOT NULL,
+    display_name  VARCHAR(160) NOT NULL,
+    values_json   JSON NOT NULL,
+    created_at    TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at    TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (id),
+    CONSTRAINT fk_row_template
+        FOREIGN KEY (template_id) REFERENCES template(id)
+            ON DELETE CASCADE,
+    KEY ix_row_owner_template_created (owner_id, template_id, created_at)
+);
+```
+
+### How Values are Stored
+
+Row values are stored as JSON in the `values_json` column:
+
+```json
+{
+  "marca": "Toyota",
+  "combustible": "Gasolina",
+  "kilometros": 45000,
+  "fecha_compra": "2023-05-15",
+  "vendido": false
+}
+```
+
+This provides flexibility while maintaining type safety through application-level validation.
+
+## Complete CRUD Example
+
+```bash
+TEMPLATE_ID="a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+TOKEN="your_jwt_token"
+
+# CREATE - Add a new row
+curl -X POST "http://localhost:8080/api/v1/templates/$TEMPLATE_ID/rows" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "displayName": "BMW Serie 3 2021",
+    "values": {
+      "marca": "BMW",
+      "combustible": "Diesel",
+      "kilometros": 25000,
+      "fecha_compra": "2024-06-10",
+      "vendido": false
+    }
+  }'
+
+# Save the row ID from response
+ROW_ID="f1a2b3c4-d5e6-7890-abcd-ef1234567890"
+
+# READ - Get all rows
+curl -X GET "http://localhost:8080/api/v1/templates/$TEMPLATE_ID/rows" \
+  -H "Authorization: Bearer $TOKEN"
+
+# READ - Get single row
+curl -X GET "http://localhost:8080/api/v1/templates/$TEMPLATE_ID/rows/$ROW_ID" \
+  -H "Authorization: Bearer $TOKEN"
+
+# UPDATE - Partial update
+curl -X PATCH "http://localhost:8080/api/v1/templates/$TEMPLATE_ID/rows/$ROW_ID" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "values": {
+      "kilometros": 27000,
+      "vendido": true
+    }
+  }'
+
+# DELETE - Remove row
+curl -X DELETE "http://localhost:8080/api/v1/templates/$TEMPLATE_ID/rows/$ROW_ID" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+## Common Error Scenarios
+
+<CardGroup cols={2}>
+
+<Card title="Template Without Fields" icon="table">
+  **Error:** "No puedes crear filas: el template no tiene columnas definidas"  
+  **Solution:** Add at least one field to the template first
+</Card>
+
+<Card title="Unknown Field" icon="question">
+  **Error:** "Campo no permitido en values: {key}"  
+  **Solution:** Only use field keys defined in the template
+</Card>
+
+<Card title="Missing Required Field" icon="exclamation">
+  **Error:** "Falta campo obligatorio: {key}"  
+  **Solution:** Provide all fields marked as required
+</Card>
+
+<Card title="Type Mismatch" icon="triangle-exclamation">
+  **Error:** "Campo {key} debe ser {type}"  
+  **Solution:** Ensure values match their field's data type
+</Card>
+
+<Card title="Invalid SELECT Value" icon="list">
+  **Error:** "Valor no permitido para {key}"  
+  **Solution:** Use only values from the field's optionsJson
+</Card>
+
+<Card title="Invalid Date Format" icon="calendar">
+  **Error:** "Campo {key} DATE inválida (YYYY-MM-DD)"  
+  **Solution:** Use ISO date format: "2026-03-06"
+</Card>
+
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+
+<Card title="Scoring System" icon="star" href="/guides/scoring-system">
+  Add scoring and comments to track row quality
+</Card>
+
+<Card title="Row API Reference" icon="code" href="/api/rows">
+  Complete row API documentation
+</Card>
+
+<Card title="Creating Templates" icon="table-list" href="/guides/creating-templates">
+  Learn more about template creation
+</Card>
+
+<Card title="Authentication" icon="lock" href="/guides/authentication">
+  Review authentication requirements
+</Card>
+
+</CardGroup>

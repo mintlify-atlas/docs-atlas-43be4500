@@ -1,0 +1,296 @@
+---
+title: Templates
+description: Create custom categories to organize your data
+icon: folder-tree
+---
+
+## Overview
+
+Templates are the foundation of Bitácora Universal. Think of them as custom categories or "types" of notebooks you want to track. Each template represents a unique collection of structured data - whether that's a list of used cars, movies you've watched, restaurants to try, or any other category you want to organize.
+
+<Info>
+Templates are like spreadsheet tabs or database tables - they define **what** you're tracking, while fields define **how** you're tracking it.
+</Info>
+
+## Why Use Templates?
+
+Templates give you the flexibility to create unlimited custom notebooks without any predefined structure:
+
+<CardGroup cols={2}>
+  <Card title="Personal Organization" icon="user">
+    Track anything from car purchases to apartment viewings to job applications
+  </Card>
+  <Card title="Flexible Structure" icon="grid">
+    Each template can have its own unique fields and data types
+  </Card>
+  <Card title="Complete Isolation" icon="shield">
+    Templates are isolated per user - your data is private
+  </Card>
+  <Card title="Unlimited Creation" icon="infinity">
+    Create as many templates as you need for different aspects of your life
+  </Card>
+</CardGroup>
+
+## Data Structure
+
+Templates are stored in the `template` table with the following structure:
+
+### Database Schema
+
+```sql
+CREATE TABLE template (
+  id            BINARY(16) NOT NULL,
+  owner_id      VARCHAR(64) NOT NULL,
+  name          VARCHAR(120) NOT NULL,
+  description   VARCHAR(500) NULL,
+  created_at    TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at    TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_template_owner_name (owner_id, name)
+);
+```
+
+### Java Entity
+
+The backend uses JPA entities to represent templates:
+
+```java
+@Entity
+@Table(name = "template",
+        uniqueConstraints = @UniqueConstraint(
+          name = "uk_template_owner_name", 
+          columnNames = {"owner_id", "name"}
+        ))
+public class TemplateEntity {
+
+    @Id
+    @Column(name = "id", nullable = false, columnDefinition = "BINARY(16)")
+    private UUID id;
+
+    @Column(name = "owner_id", nullable = false, length = 64)
+    private String ownerId;
+
+    @Column(name = "name", nullable = false, length = 120)
+    private String name;
+
+    @Column(name = "description", length = 500)
+    private String description;
+
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private Instant createdAt;
+
+    @Column(name = "updated_at", nullable = false)
+    private Instant updatedAt;
+}
+```
+
+<Note>
+See `TemplateEntity.java:10` for the complete entity implementation with lifecycle hooks.
+</Note>
+
+### TypeScript Type
+
+The frontend works with template data using TypeScript interfaces:
+
+```typescript
+export type TemplateResponse = {
+  id: string;
+  name: string;
+  description: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateTemplateRequest = {
+  name: string;
+  description?: string | null;
+};
+```
+
+## Field Constraints
+
+| Field | Type | Required | Max Length | Notes |
+|-------|------|----------|------------|-------|
+| `id` | UUID | Yes (auto) | 16 bytes | Auto-generated on creation |
+| `owner_id` | String | Yes | 64 chars | Set from authenticated user context |
+| `name` | String | Yes | 120 chars | Must be unique per user |
+| `description` | String | No | 500 chars | Optional additional context |
+| `created_at` | Timestamp | Yes (auto) | - | Auto-set on insert |
+| `updated_at` | Timestamp | Yes (auto) | - | Auto-updated on changes |
+
+<Info>
+The unique constraint `uk_template_owner_name` ensures each user cannot create two templates with the same name.
+</Info>
+
+## User Workflows
+
+### Creating a Template
+
+Users create templates through a modal interface that captures the basic information:
+
+1. Click "Nueva plantilla" button
+2. Enter a required name (e.g., "Coches usados")
+3. Optionally add a description (e.g., "Mi excel personal para registrar coches")
+4. Submit to create the template
+
+<Accordion title="Code: Template Creation Modal">
+From `NewTemplateModal.tsx:17`:
+
+```typescript
+async function submit() {
+  setError(null);
+
+  const n = name.trim();
+  const d = description.trim();
+
+  if (!n) {
+    setError("El nombre es obligatorio.");
+    return;
+  }
+
+  setSaving(true);
+  try {
+    await api.post("/api/v1/templates", {
+      name: n,
+      description: d ? d : null,
+    });
+
+    setName("");
+    setDescription("");
+    props.onClose();
+    props.onCreated();
+  } catch (e: any) {
+    setError(e?.message ?? "No se pudo crear la plantilla");
+  } finally {
+    setSaving(false);
+  }
+}
+```
+</Accordion>
+
+### Backend Validation
+
+The backend service enforces business rules during template creation:
+
+```java
+public TemplateResponse create(CreateTemplateRequest req) {
+    String owner = ownerId();
+    String name = req.getName().trim();
+
+    // Prevent duplicate names
+    if (repository.existsByOwnerIdAndName(owner, name)) {
+        throw new ConflictException("Ya existe una plantilla con ese nombre");
+    }
+
+    TemplateEntity e = new TemplateEntity();
+    e.setOwnerId(owner);
+    e.setName(name);
+    e.setDescription(req.getDescription() == null ? null : req.getDescription().trim());
+
+    TemplateEntity saved = repository.save(e);
+    return new TemplateResponse(
+        saved.getId(), 
+        saved.getName(), 
+        saved.getDescription(), 
+        saved.getCreatedAt(), 
+        saved.getUpdatedAt()
+    );
+}
+```
+
+<Note>
+See `TemplateService.java:32` for the complete creation logic.
+</Note>
+
+### Listing Templates
+
+Users can view all their templates in chronological order (newest first):
+
+```java
+public List<TemplateResponse> list() {
+    return repository.findByOwnerIdOrderByCreatedAtDesc(ownerId())
+            .stream()
+            .map(t -> new TemplateResponse(
+                t.getId(), 
+                t.getName(), 
+                t.getDescription(), 
+                t.getCreatedAt(), 
+                t.getUpdatedAt()
+            ))
+            .toList();
+}
+```
+
+### Viewing Template Details
+
+When viewing a specific template, users see the template metadata along with all its defined fields:
+
+```java
+public TemplateDetailResponse getOneWithFields(UUID templateId) {
+    TemplateEntity t = repository.findByIdAndOwnerId(templateId, ownerId())
+            .orElseThrow(() -> new ConflictException("Template no encontrado"));
+
+    List<TemplateFieldEntity> fields = fieldRepository
+            .findByTemplateIdOrderByOrderIndexAsc(templateId);
+
+    List<FieldResponse> fieldResponses = fields.stream()
+            .map(f -> new FieldResponse(
+                f.getId(),
+                f.getFieldKey(),
+                f.getLabel(),
+                f.getDataType(),
+                f.isRequired(),
+                f.getOptionsJson(),
+                f.getOrderIndex()
+            ))
+            .toList();
+
+    return new TemplateDetailResponse(
+        t.getId(),
+        t.getName(),
+        t.getDescription(),
+        t.getCreatedAt(),
+        t.getUpdatedAt(),
+        fieldResponses
+    );
+}
+```
+
+## Common Use Cases
+
+<CardGroup cols={2}>
+  <Card title="Car Shopping" icon="car">
+    Create a template to track used cars you're considering, with fields for make, model, year, price, and mileage
+  </Card>
+  <Card title="Apartment Hunting" icon="building">
+    Track apartments with fields for location, rent, square footage, and amenities
+  </Card>
+  <Card title="Job Applications" icon="briefcase">
+    Monitor job applications with company name, position, salary range, and application status
+  </Card>
+  <Card title="Movie Watchlist" icon="film">
+    Keep a list of movies with title, genre, director, and your personal rating
+  </Card>
+</CardGroup>
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/templates` | Create a new template |
+| `GET` | `/api/v1/templates` | List all user templates |
+| `GET` | `/api/v1/templates/{id}` | Get template details with fields |
+
+## Related Features
+
+<CardGroup cols={3}>
+  <Card title="Fields" icon="table-columns" href="/features/fields">
+    Define custom columns for your templates
+  </Card>
+  <Card title="Rows" icon="table-rows" href="/features/rows">
+    Add data records to your templates
+  </Card>
+  <Card title="Logs" icon="clock-rotate-left" href="/features/logs">
+    Track history and scores for your rows
+  </Card>
+</CardGroup>

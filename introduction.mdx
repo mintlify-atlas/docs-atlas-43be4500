@@ -1,0 +1,105 @@
+---
+title: Introduction
+description: Welcome to Bitácora Universal - your personal notebook for organizing anything
+---
+
+# Welcome to Bitácora Universal
+
+Bitácora Universal is a flexible personal notebook application that lets you organize anything - from your car collection to your favorite restaurants, travel destinations, or workout routines. Create custom templates, define your own fields, and track everything with detailed logs and scoring.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get up and running in 5 minutes
+  </Card>
+  <Card title="Core Features" icon="sparkles" href="/features/templates">
+    Explore templates, fields, rows, and logs
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Integrate with the REST API
+  </Card>
+  <Card title="Development" icon="hammer" href="/development/architecture">
+    Learn about the architecture
+  </Card>
+</CardGroup>
+
+## What is Bitácora Universal?
+
+Bitácora Universal is a personal notebook application where you can:
+
+- **Create Templates**: Define categories for anything you want to track (cars, cities, books, workouts)
+- **Define Custom Fields**: Add columns with different data types (text, numbers, dates, booleans, selects)
+- **Add Records**: Create unlimited rows of data within each template
+- **Track with Logs**: Add historical entries with scores (0-10), comments, and dates
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Custom Templates" icon="table">
+    Create unlimited templates to organize different types of data
+  </Card>
+  <Card title="Flexible Fields" icon="list">
+    Define fields with TEXT, NUMBER, BOOLEAN, DATE, or SELECT types
+  </Card>
+  <Card title="Dynamic Records" icon="database">
+    Store data as JSON for maximum flexibility
+  </Card>
+  <Card title="Scoring System" icon="star">
+    Rate entries from 0-10 with comments and event dates
+  </Card>
+  <Card title="User Authentication" icon="shield">
+    Secure JWT-based authentication with data isolation
+  </Card>
+  <Card title="Full-Stack" icon="layer-group">
+    Spring Boot backend + React frontend
+  </Card>
+</CardGroup>
+
+## Example Use Cases
+
+<AccordionGroup>
+  <Accordion title="Car Collection">
+    Create a "Cars" template with fields like Brand, Model, Year, Fuel Type, and Color. Add each car as a row, then log maintenance records with scores for condition, mileage updates, and service notes.
+  </Accordion>
+  
+  <Accordion title="Restaurant Reviews">
+    Build a "Restaurants" template with Name, Cuisine Type, Location, and Price Range fields. Add restaurants as rows and log each visit with a score (1-10), what you ordered, and your experience notes.
+  </Accordion>
+  
+  <Accordion title="Travel Destinations">
+    Design a "Cities" template with fields for Country, Population, Best Season, and Must-Visit Places. Track your visits with logs containing ratings, travel dates, and memorable experiences.
+  </Accordion>
+  
+  <Accordion title="Workout Tracker">
+    Create an "Exercises" template with Exercise Name, Muscle Group, Equipment, and Difficulty Level. Log each workout session with performance scores, weight/reps, and progress notes.
+  </Accordion>
+</AccordionGroup>
+
+## Technology Stack
+
+Bitácora Universal is built with modern technologies:
+
+**Backend**
+- Java 21
+- Spring Boot 4
+- Spring Security + JWT authentication
+- Spring Data JPA
+- MySQL 8
+- Flyway migrations
+
+**Frontend**
+- React 19
+- TypeScript
+- Vite
+- Tailwind CSS
+
+**Infrastructure**
+- Docker + Docker Compose
+- RESTful API design
+
+## Getting Started
+
+Ready to dive in? Follow our [Quickstart Guide](/quickstart) to set up your development environment and create your first template, or explore the [API Reference](/api/overview) to integrate with your own applications.
+
+<Card title="Next: Quickstart" icon="arrow-right" href="/quickstart">
+  Set up Bitácora Universal and create your first template
+</Card>

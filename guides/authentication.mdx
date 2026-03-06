@@ -1,0 +1,296 @@
+---
+title: 'Authentication Guide'
+description: 'Complete guide to user authentication in Bitácora Universal'
+---
+
+This guide walks you through implementing authentication in Bitácora Universal, from user registration to making authenticated API requests.
+
+## Overview
+
+Bitácora Universal uses JWT (JSON Web Token) based authentication with BCrypt password hashing. All API endpoints except `/api/v1/auth/**` and `/health` require authentication.
+
+<Note>
+The authentication system is stateless - no sessions are stored on the server. Each request must include a valid JWT token in the `Authorization` header.
+</Note>
+
+## Authentication Flow
+
+<Steps>
+
+### Register a New User
+
+Create a new account by sending user credentials to the registration endpoint.
+
+**Endpoint:** `POST /api/v1/auth/register`
+
+**Request Body:**
+
+```json
+{
+  "email": "daniel@test.com",
+  "password": "123456"
+}
+```
+
+**Validation Rules:**
+- Email must be valid format
+- Email must be unique
+- Password minimum 6 characters, maximum 72 characters
+
+**Response (201 Created):**
+
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+<Warning>
+If the email already exists, you'll receive a `409 Conflict` error with message: "Email ya registrado"
+</Warning>
+
+**Implementation Reference:**
+
+The registration flow is handled in `AuthService.java:25`:
+
+```java
+public String register(String email, String password) {
+    String norm = normalizeEmail(email);
+    
+    if (userRepository.existsByEmail(norm)) {
+        throw new ConflictException("Email ya registrado");
+    }
+    
+    AppUserEntity u = new AppUserEntity();
+    u.setEmail(norm);
+    u.setPasswordHash(passwordEncoder.encode(password));
+    
+    AppUserEntity saved = userRepository.save(u);
+    return jwtService.createToken(saved.getId(), saved.getEmail());
+}
+```
+
+### Login with Existing Account
+
+Authenticate with existing credentials to obtain a JWT token.
+
+**Endpoint:** `POST /api/v1/auth/login`
+
+**Request Body:**
+
+```json
+{
+  "email": "daniel@test.com",
+  "password": "123456"
+}
+```
+
+**Response (200 OK):**
+
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+**Error Response (409 Conflict):**
+
+```json
+{
+  "message": "Credenciales inválidas"
+}
+```
+
+### Store the JWT Token
+
+Once you receive the token, store it securely for subsequent API requests.
+
+**Frontend Example:**
+
+From `Login.tsx:23`:
+
+```typescript
+const res = await api.post<AuthResponse>(path, { email, password });
+setToken(res.token);
+props.onDone();
+```
+
+<Tip>
+Store the token in memory or sessionStorage for single-session apps. Avoid localStorage for sensitive applications.
+</Tip>
+
+### Make Authenticated Requests
+
+Include the JWT token in the `Authorization` header for all protected endpoints.
+
+**Header Format:**
+
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**cURL Example:**
+
+```bash
+curl -X GET 'http://localhost:8080/api/v1/templates' \
+  -H 'Authorization: Bearer YOUR_JWT_TOKEN' \
+  -H 'Content-Type: application/json'
+```
+
+**JavaScript Example:**
+
+```javascript
+const response = await fetch('http://localhost:8080/api/v1/templates', {
+  method: 'GET',
+  headers: {
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json'
+  }
+});
+```
+
+</Steps>
+
+## Security Implementation
+
+### Password Hashing
+
+Passwords are hashed using BCrypt with Spring Security's `BCryptPasswordEncoder`.
+
+**Configuration:** `SecurityConfig.java:64`
+
+```java
+@Bean
+public PasswordEncoder passwordEncoder() {
+    return new BCryptPasswordEncoder();
+}
+```
+
+### JWT Filter
+
+All requests pass through `JwtAuthFilter` which validates tokens and sets the security context.
+
+**Key Logic:** `JwtAuthFilter.java:42`
+
+```java
+String auth = request.getHeader("Authorization");
+if (auth != null && auth.startsWith("Bearer ")) {
+    String token = auth.substring(7);
+    try {
+        JwtPrincipal p = jwtService.parse(token);
+        var authentication = 
+            new UsernamePasswordAuthenticationToken(p, null, List.of());
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+    } catch (Exception ignored) {
+        SecurityContextHolder.clearContext();
+    }
+}
+```
+
+### CORS Configuration
+
+The API is configured to accept requests from localhost development servers.
+
+**Allowed Origins:** `SecurityConfig.java:45`
+
+```java
+cfg.setAllowedOrigins(List.of(
+    "http://localhost:5173",
+    "http://127.0.0.1:5173"
+));
+```
+
+**Allowed Headers:**
+- `Authorization`
+- `Content-Type`
+- `Accept`
+- `Origin`
+
+## Error Handling
+
+<CardGroup cols={2}>
+
+<Card title="Invalid Credentials" icon="lock">
+  **Status:** 409 Conflict  
+  **Message:** "Credenciales inválidas"  
+  **Cause:** Wrong email or password during login
+</Card>
+
+<Card title="Email Already Registered" icon="user-plus">
+  **Status:** 409 Conflict  
+  **Message:** "Email ya registrado"  
+  **Cause:** Attempting to register with existing email
+</Card>
+
+<Card title="Missing Token" icon="key">
+  **Status:** 401 Unauthorized  
+  **Cause:** No Authorization header on protected endpoint
+</Card>
+
+<Card title="Invalid Token" icon="shield-halved">
+  **Status:** 401 Unauthorized  
+  **Cause:** Expired, malformed, or invalid JWT token
+</Card>
+
+</CardGroup>
+
+## Testing Authentication
+
+### Complete Registration Flow
+
+```bash
+# 1. Register new user
+curl -X POST 'http://localhost:8080/api/v1/auth/register' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "email": "test@example.com",
+    "password": "securepass123"
+  }'
+
+# Response:
+# {"token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."}
+
+# 2. Use token to access protected endpoint
+curl -X GET 'http://localhost:8080/api/v1/templates' \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
+```
+
+### Complete Login Flow
+
+```bash
+# 1. Login with existing user
+curl -X POST 'http://localhost:8080/api/v1/auth/login' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "email": "test@example.com",
+    "password": "securepass123"
+  }'
+
+# 2. Store token and use for subsequent requests
+export TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+
+curl -X GET 'http://localhost:8080/api/v1/templates' \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+
+<Card title="Create Templates" icon="table" href="/guides/creating-templates">
+  Learn how to create custom data templates
+</Card>
+
+<Card title="Manage Data" icon="database" href="/guides/managing-data">
+  Add and update rows in your templates
+</Card>
+
+<Card title="API Reference" icon="code" href="/api/authentication">
+  View complete authentication API documentation
+</Card>
+
+<Card title="Security Config" icon="shield" href="/guides/authentication">
+  Explore security configuration details
+</Card>
+
+</CardGroup>
